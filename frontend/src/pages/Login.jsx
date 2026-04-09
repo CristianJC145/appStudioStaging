@@ -119,7 +119,7 @@ export default function Login() {
             </div>
             <div className="lg-brand">
               <span className="lg-brand-name">Ingeniería de la Manifestación</span>
-              <span className="lg-brand-title">Studio <span>Pro</span></span>
+              <span className="lg-brand-title">Test <span>Studio</span></span>
               <span className="lg-brand-sub">
                 {tab === "login" ? "Bienvenido de vuelta" : "Crea tu cuenta"}
               </span>
