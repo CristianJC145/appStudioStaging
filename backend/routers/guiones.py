@@ -372,7 +372,8 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
         )
         es_intro_medit = prefijo in ("intro", "medit")
         if usar_warmup:
-            texto_api = cfg.texto_calentamiento + "\n\n" + texto
+            calentamiento_con_break = re.sub(r'\s*$', ' <break time="1.0s"/>', cfg.texto_calentamiento.rstrip())
+            texto_api = calentamiento_con_break + "\n\n" + texto
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp.close()
             tmp_path = Path(tmp.name)
