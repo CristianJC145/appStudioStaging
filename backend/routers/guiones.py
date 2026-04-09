@@ -369,7 +369,7 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
         usar_warmup = (
             cfg.usar_calentamiento
             and cfg.texto_calentamiento
-            and prefijo in ("intro", "medit")
+            and prefijo in ("intro", "medit", "afirm_grp")
         )
         es_intro_medit = prefijo in ("intro", "medit")
         if usar_warmup:
@@ -436,7 +436,18 @@ def _construir_bloques(texto: str, cfg: Config) -> list[str]:
     Trata cada línea como unidad y las fusiona con \\n\\n hasta alcanzar
     min_chars, preservando la estructura para que insertar_breaks_ssml
     pueda agregar los breaks de párrafo correctamente.
+
+    Cuando el calentamiento está activo se descuenta su overhead del límite
+    máximo de caracteres, ya que se antepone a cada segmento antes del TTS.
     """
+    # Overhead del calentamiento: texto + ' <break time="2.0s"/>\n\n'
+    if cfg.usar_calentamiento and cfg.texto_calentamiento:
+        _warmup_overhead = len(cfg.texto_calentamiento.rstrip()) + 23
+    else:
+        _warmup_overhead = 0
+    max_chars = cfg.max_chars_parrafo - _warmup_overhead
+    min_chars = cfg.min_chars_parrafo
+
     lineas = [l.strip() for l in texto.splitlines() if l.strip()]
 
     fusionados: list[str] = []
@@ -445,9 +456,9 @@ def _construir_bloques(texto: str, cfg: Config) -> list[str]:
         if not buffer:
             buffer = linea
         else:
-            if len(buffer) < cfg.min_chars_parrafo:
+            if len(buffer) < min_chars:
                 candidato = buffer + "\n\n" + linea
-                if len(candidato) <= cfg.max_chars_parrafo:
+                if len(candidato) <= max_chars:
                     buffer = candidato
                 else:
                     fusionados.append(buffer)
@@ -457,21 +468,21 @@ def _construir_bloques(texto: str, cfg: Config) -> list[str]:
                 buffer = linea
     if buffer:
         if (fusionados
-                and len(buffer) < cfg.min_chars_parrafo
-                and len(fusionados[-1]) + 2 + len(buffer) <= cfg.max_chars_parrafo):
+                and len(buffer) < min_chars
+                and len(fusionados[-1]) + 2 + len(buffer) <= max_chars):
             fusionados[-1] = fusionados[-1] + "\n\n" + buffer
         else:
             fusionados.append(buffer)
 
     bloques: list[str] = []
     for bloque in fusionados:
-        if len(bloque) <= cfg.max_chars_parrafo:
+        if len(bloque) <= max_chars:
             bloques.append(bloque)
         else:
             oraciones = re.split(r'(?<=[.!?])\s+', bloque)
             bloque_actual = ""
             for oracion in oraciones:
-                if len(bloque_actual) + len(oracion) + 2 <= cfg.max_chars_parrafo:
+                if len(bloque_actual) + len(oracion) + 2 <= max_chars:
                     bloque_actual += ("\n\n" if bloque_actual else "") + oracion
                 else:
                     if bloque_actual:
@@ -489,11 +500,22 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
     Usa _break_largo como separador para mantener los 10 s entre afirmaciones
     incluso cuando quedan en el mismo bloque.
 
+    Cuando el calentamiento está activo se descuenta su overhead del límite
+    máximo de caracteres, ya que se antepone a cada segmento antes del TTS.
+
     Returns:
         bloques_texto  : list[str]        — texto fusionado para TTS
         lineas_x_bloque: list[list[str]]  — líneas originales de cada bloque
                                             (para dividir el audio después)
     """
+    # Overhead del calentamiento: texto + ' <break time="2.0s"/>\n\n'
+    if cfg.usar_calentamiento and cfg.texto_calentamiento:
+        _warmup_overhead = len(cfg.texto_calentamiento.rstrip()) + 23
+    else:
+        _warmup_overhead = 0
+    max_chars = cfg.max_chars_parrafo - _warmup_overhead
+    min_chars = cfg.min_chars_parrafo
+
     sep = _break_largo(_SSML_SPLIT_PAUSE_MS)
     lineas = [l.strip() for l in texto.splitlines() if l.strip()]
 
@@ -507,9 +529,9 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
         if not buf_t:
             buf_t = linea
             buf_l = [linea]
-        elif len(buf_t) < cfg.min_chars_parrafo:
+        elif len(buf_t) < min_chars:
             candidato = buf_t + " " + sep + "\n\n" + linea
-            if len(candidato) <= cfg.max_chars_parrafo:
+            if len(candidato) <= max_chars:
                 buf_t = candidato
                 buf_l.append(linea)
             else:
@@ -521,8 +543,8 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
 
     if buf_l:
         if (grupos_t
-                and len(buf_t) < cfg.min_chars_parrafo
-                and len(grupos_t[-1]) + len(sep) + 2 + len(buf_t) <= cfg.max_chars_parrafo):
+                and len(buf_t) < min_chars
+                and len(grupos_t[-1]) + len(sep) + 2 + len(buf_t) <= max_chars):
             grupos_t[-1] = grupos_t[-1] + " " + sep + "\n\n" + buf_t
             grupos_l[-1].extend(buf_l)
         else:
@@ -532,7 +554,7 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
     bloques_t: list[str]       = []
     bloques_l: list[list[str]] = []
     for g_t, g_l in zip(grupos_t, grupos_l):
-        if len(g_t) <= cfg.max_chars_parrafo:
+        if len(g_t) <= max_chars:
             bloques_t.append(g_t);  bloques_l.append(g_l)
         else:
             for linea in g_l:
