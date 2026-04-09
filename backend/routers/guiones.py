@@ -738,6 +738,51 @@ def _cortar_por_timestamps(
     return segmentos
 
 
+def _regenerar_afirm_individual(
+    texto: str,
+    carpeta: Path,
+    indice: int,
+    voice_speed: float,
+    tempo_factor: float,
+    cfg: Config,
+) -> Optional["AudioSegment"]:
+    """
+    Regenera una afirmación individual usando el texto de calentamiento como
+    filler (igual que intro/medit) para garantizar corte limpio en silencio
+    explícito.  No depende del grupo original ni de timestamps.
+    """
+    fmt = getattr(cfg, "output_format", "mp3_44100_128") or "mp3_44100_128"
+    ruta = carpeta / f"afirm_regen_{indice:05d}_{hash_texto(texto, voice_speed, cfg.voice_settings.model_dump(), fmt)}.wav"
+    ruta.unlink(missing_ok=True)  # siempre fuerza regeneración
+
+    usar_warmup = cfg.usar_calentamiento and cfg.texto_calentamiento
+    if usar_warmup:
+        calentamiento_con_break = re.sub(
+            r'\s*$', ' <break time="2.0s"/>', cfg.texto_calentamiento.rstrip()
+        )
+        texto_api = calentamiento_con_break + "\n\n" + texto
+    else:
+        texto_api = texto
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+    try:
+        ok = texto_a_audio_api(texto_api, tmp_path, voice_speed, cfg,
+                               skip_punctuation_breaks=True)
+        if not ok:
+            return None
+        audio_raw = _load_audio(tmp_path, fmt)
+        audio = _trim_calentamiento(audio_raw) if usar_warmup else _trim_silence(audio_raw)
+        if tempo_factor != 1.0:
+            audio = aplicar_tempo(audio, tempo_factor)
+        if cfg.extend_silence:
+            audio = extender_silencios_internos(audio, cfg)
+        return audio
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 # =============================================================
 #  HELPERS DE REVISIÓN
 # =============================================================
@@ -954,54 +999,22 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                         "index": flat_i, "section": "afirm",
                         "message": f"Regenerando afirmación {flat_i + 1}..."
                     })
-                    grp_idx, _ = afirm_flat_to_grp[flat_i]
-                    grupo_texto  = afirm_grupos[grp_idx]
-                    grupo_lineas = afirm_lineas_x_grupo[grp_idx]
-                    n_en_grupo   = len(grupo_lineas)
+                    texto_afirm = afirmaciones[flat_i]
 
-                    # Regenera el grupo completo para respetar la regla min/max
-                    audio_grp, characters, char_end_ms = _cargar_grupo_afirm_timestamps(
-                        grupo_texto, carpeta, grp_idx, cfg.afirm_voice_speed, cfg,
-                        force_regen=True
+                    # Regeneración individual con filler (warmup) para garantizar
+                    # corte limpio en silencio explícito, independiente del grupo.
+                    audio = _regenerar_afirm_individual(
+                        texto_afirm, carpeta, flat_i, cfg.afirm_voice_speed,
+                        cfg.afirm_tempo_factor, cfg
                     )
-
-                    if audio_grp and n_en_grupo > 1:
-                        raw_segs = _cortar_por_timestamps(
-                            audio_grp, characters, char_end_ms, grupo_lineas
-                        )
-                    elif audio_grp:
-                        raw_segs = [audio_grp]
-                    else:
-                        raw_segs = [None] * n_en_grupo
-
-                    grp_flat_start = sum(
-                        len(afirm_lineas_x_grupo[g]) for g in range(grp_idx)
-                    )
-                    for pos, seg in enumerate(raw_segs):
-                        target_flat = grp_flat_start + pos
-                        # No sobreescribir previews ya aprobados
-                        if decisions.get(target_flat) not in (None, "regenerate"):
-                            continue
-                        if seg is None:
-                            continue
-                        seg = _trim_silence(seg)
-                        if cfg.afirm_tempo_factor != 1.0:
-                            seg = aplicar_tempo(seg, cfg.afirm_tempo_factor)
-                        if cfg.extend_silence:
-                            seg = extender_silencios_internos(seg, cfg)
-                        audio_url = _guardar_preview(seg, job_id, "afirm", target_flat)
+                    if audio:
+                        audio_url = _guardar_preview(audio, job_id, "afirm", flat_i)
+                        del decisions[flat_i]
                         emit_event(job_id, "afirm_ready", {
-                            "index": target_flat, "section": "afirm",
-                            "text": afirmaciones[target_flat], "audio_url": audio_url,
-                            "message": f"Afirmación {target_flat + 1} regenerada"
+                            "index": flat_i, "section": "afirm",
+                            "text": texto_afirm, "audio_url": audio_url,
+                            "message": f"Afirmación {flat_i + 1} regenerada"
                         })
-
-                    # Marca como resueltas todas las afirmaciones del grupo
-                    # (por si varias del mismo grupo pedían regeneración simultánea)
-                    for pos in range(n_en_grupo):
-                        target = grp_flat_start + pos
-                        if decisions.get(target) == "regenerate":
-                            del decisions[target]
 
             emit_event(job_id, "afirm_review_done", {"message": "Revisión de afirmaciones completada"})
 
