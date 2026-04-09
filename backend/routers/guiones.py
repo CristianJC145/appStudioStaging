@@ -5,6 +5,7 @@ Toda la lógica de TTS, revisión y ensamblado de audio.
 
 import re
 import os
+import io
 import json
 import time
 import uuid
@@ -369,7 +370,7 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
         usar_warmup = (
             cfg.usar_calentamiento
             and cfg.texto_calentamiento
-            and prefijo in ("intro", "medit", "afirm_grp")
+            and prefijo in ("intro", "medit", "afirm")
         )
         es_intro_medit = prefijo in ("intro", "medit")
         if usar_warmup:
@@ -497,26 +498,19 @@ def _construir_bloques(texto: str, cfg: Config) -> list[str]:
 def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[list[str]]]:
     """
     Para afirmaciones: fusiona líneas cortas respetando min/max chars.
-    Usa _break_largo como separador para mantener los 10 s entre afirmaciones
-    incluso cuando quedan en el mismo bloque.
-
-    Cuando el calentamiento está activo se descuenta su overhead del límite
-    máximo de caracteres, ya que se antepone a cada segmento antes del TTS.
+    Las afirmaciones se unen con "\\n\\n" (sin breaks SSML); los puntos de
+    corte exactos se obtienen mediante el endpoint /with-timestamps de
+    ElevenLabs en lugar de detectar silencios.
 
     Returns:
         bloques_texto  : list[str]        — texto fusionado para TTS
         lineas_x_bloque: list[list[str]]  — líneas originales de cada bloque
                                             (para dividir el audio después)
     """
-    # Overhead del calentamiento: texto + ' <break time="2.0s"/>\n\n'
-    if cfg.usar_calentamiento and cfg.texto_calentamiento:
-        _warmup_overhead = len(cfg.texto_calentamiento.rstrip()) + 23
-    else:
-        _warmup_overhead = 0
-    max_chars = cfg.max_chars_parrafo - _warmup_overhead
+    max_chars = cfg.max_chars_parrafo
     min_chars = cfg.min_chars_parrafo
+    sep = "\n\n"
 
-    sep = _break_largo(_SSML_SPLIT_PAUSE_MS)
     lineas = [l.strip() for l in texto.splitlines() if l.strip()]
 
     grupos_t: list[str]        = []   # texto TTS de cada grupo
@@ -530,7 +524,7 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
             buf_t = linea
             buf_l = [linea]
         elif len(buf_t) < min_chars:
-            candidato = buf_t + " " + sep + "\n\n" + linea
+            candidato = buf_t + sep + linea
             if len(candidato) <= max_chars:
                 buf_t = candidato
                 buf_l.append(linea)
@@ -544,8 +538,8 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
     if buf_l:
         if (grupos_t
                 and len(buf_t) < min_chars
-                and len(grupos_t[-1]) + len(sep) + 2 + len(buf_t) <= max_chars):
-            grupos_t[-1] = grupos_t[-1] + " " + sep + "\n\n" + buf_t
+                and len(grupos_t[-1]) + len(sep) + len(buf_t) <= max_chars):
+            grupos_t[-1] = grupos_t[-1] + sep + buf_t
             grupos_l[-1].extend(buf_l)
         else:
             grupos_t.append(buf_t);  grupos_l.append(buf_l)
@@ -561,12 +555,6 @@ def _construir_bloques_afirm(texto: str, cfg: Config) -> tuple[list[str], list[l
                 bloques_t.append(linea);  bloques_l.append([linea])
 
     return bloques_t, bloques_l
-
-
-# Pausa SSML interna entre afirmaciones agrupadas (solo para detectar el punto de corte).
-# No es la pausa final del audio: esa se añade en el ensamblado y la controla el usuario.
-# 3 s es más que suficiente para la detección; reduce el tiempo de TTS respecto a 10 s.
-_SSML_SPLIT_PAUSE_MS = 3000
 
 
 def _trim_silence(
@@ -630,6 +618,125 @@ def _split_audio_at_silences(
         audio[i * chunk : (i + 1) * chunk if i < n - 1 else dur]
         for i in range(n)
     ]
+
+# =============================================================
+#  AFIRMACIONES: TIMESTAMPS API
+# =============================================================
+
+def _cargar_grupo_afirm_timestamps(
+    texto_grupo: str,
+    carpeta: Path,
+    indice: int,
+    voice_speed: float,
+    cfg: Config,
+    force_regen: bool = False,
+) -> tuple[Optional["AudioSegment"], list[str], list[float]]:
+    """
+    Genera el audio de un grupo de afirmaciones llamando al endpoint
+    /with-timestamps de ElevenLabs.  El texto va limpio (sin breaks SSML)
+    y se cachean tanto el WAV como el alignment JSON.
+
+    Returns:
+        audio          — AudioSegment del grupo, o None si falló la API.
+        characters     — lista de caracteres tal como los devuelve ElevenLabs.
+        char_end_ms    — tiempo de fin en ms de cada carácter (mismo orden).
+    """
+    settings_dict = cfg.voice_settings.model_dump()
+    # El endpoint with-timestamps siempre devuelve audio en el formato pedido;
+    # usamos mp3_44100_128 para que la decodificación sea siempre igual.
+    api_fmt = "mp3_44100_128"
+    h = hash_texto(texto_grupo, voice_speed, settings_dict, api_fmt + "_ts")
+    ruta_wav  = carpeta / f"afirm_grp_{indice:05d}_{h}.wav"
+    ruta_json = carpeta / f"afirm_grp_{indice:05d}_{h}_align.json"
+
+    if force_regen:
+        ruta_wav.unlink(missing_ok=True)
+        ruta_json.unlink(missing_ok=True)
+
+    # Cargar de caché si ambos ficheros existen
+    if ruta_wav.exists() and ruta_json.exists():
+        try:
+            audio = AudioSegment.from_file(str(ruta_wav))
+            align = json.loads(ruta_json.read_text())
+            return audio, align["characters"], align["char_end_ms"]
+        except Exception:
+            pass  # caché corrupta → regenerar
+
+    url = (f"https://api.elevenlabs.io/v1/text-to-speech/"
+           f"{cfg.voice_id}/with-timestamps?output_format={api_fmt}")
+    headers = {"xi-api-key": cfg.api_key, "Content-Type": "application/json"}
+    payload = {
+        "text": texto_grupo.strip(),
+        "model_id": cfg.model_id,
+        "language_code": cfg.language_code,
+        "voice_settings": {**cfg.voice_settings.model_dump(), "speed": voice_speed},
+    }
+
+    for intento in range(1, 4):
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                audio_bytes = base64.b64decode(data["audio_base64"])
+                audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+                alignment = data.get("alignment", {})
+                characters = alignment.get("characters", [])
+                char_end_ms = [t * 1000.0 for t in
+                               alignment.get("character_end_times_seconds", [])]
+                # Persistir en caché
+                audio.export(str(ruta_wav), format="wav")
+                ruta_json.write_text(json.dumps(
+                    {"characters": characters, "char_end_ms": char_end_ms}
+                ))
+                return audio, characters, char_end_ms
+        except Exception:
+            pass
+        time.sleep(2 ** intento)
+
+    return None, [], []
+
+
+def _cortar_por_timestamps(
+    audio: "AudioSegment",
+    characters: list[str],
+    char_end_ms: list[float],
+    lineas: list[str],
+) -> list["AudioSegment"]:
+    """
+    Divide `audio` en exactamente len(lineas) segmentos usando los timestamps
+    de caracteres devueltos por ElevenLabs.
+
+    Para cada afirmación (excepto la última) busca su texto en la cadena
+    reconstruida a partir de `characters` y usa el end_time de su último
+    carácter como punto de corte exacto.  Si el alignment no contiene
+    suficiente información hace un fallback a división equitativa.
+    """
+    if len(lineas) <= 1:
+        return [audio]
+
+    if not char_end_ms:
+        dur = len(audio)
+        n = len(lineas)
+        return [audio[i * dur // n: (i + 1) * dur // n] for i in range(n)]
+
+    aligned_text = "".join(characters)
+    segmentos: list["AudioSegment"] = []
+    cursor = 0
+    prev_ms = 0
+
+    for linea in lineas[:-1]:
+        pos = aligned_text.find(linea, cursor)
+        if pos == -1:
+            pos = cursor  # fallback: continuar desde donde estábamos
+        idx_fin = pos + len(linea) - 1
+        cut_ms = int(char_end_ms[idx_fin]) if idx_fin < len(char_end_ms) else len(audio)
+        segmentos.append(audio[prev_ms:cut_ms])
+        prev_ms = cut_ms
+        cursor = pos + len(linea)
+
+    segmentos.append(audio[prev_ms:])
+    return segmentos
+
 
 # =============================================================
 #  HELPERS DE REVISIÓN
@@ -777,20 +884,30 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     "message": f"Afirmación {flat_idx + 1}/{len(afirmaciones)}"
                 })
 
-                # Genera el audio del grupo completo (puede contener varias afirmaciones)
-                audio = cargar_oracion(
-                    grupo_texto, carpeta, "afirm_grp", i,
-                    cfg.afirm_voice_speed, cfg.afirm_tempo_factor, cfg
+                # Genera el audio del grupo usando /with-timestamps para obtener
+                # puntos de corte exactos por carácter (sin depender de silencios SSML)
+                audio_grp, characters, char_end_ms = _cargar_grupo_afirm_timestamps(
+                    grupo_texto, carpeta, i, cfg.afirm_voice_speed, cfg
                 )
 
-                if audio and n_en_grupo > 1:
-                    # Separa el audio en segmentos individuales en los silencios SSML
-                    # y recorta el silencio sobrante de cada extremo
-                    segmentos = [_trim_silence(s) for s in _split_audio_at_silences(audio, n_en_grupo)]
-                elif audio:
-                    segmentos = [_trim_silence(audio)]
+                if audio_grp and n_en_grupo > 1:
+                    raw_segs = _cortar_por_timestamps(audio_grp, characters, char_end_ms, grupo_lineas)
+                elif audio_grp:
+                    raw_segs = [audio_grp]
                 else:
-                    segmentos = [None] * n_en_grupo
+                    raw_segs = [None] * n_en_grupo
+
+                segmentos = []
+                for seg in raw_segs:
+                    if seg is None:
+                        segmentos.append(None)
+                        continue
+                    seg = _trim_silence(seg)
+                    if cfg.afirm_tempo_factor != 1.0:
+                        seg = aplicar_tempo(seg, cfg.afirm_tempo_factor)
+                    if cfg.extend_silence:
+                        seg = extender_silencios_internos(seg, cfg)
+                    segmentos.append(seg)
 
                 for linea, seg in zip(grupo_lineas, segmentos):
                     if seg is not None:
