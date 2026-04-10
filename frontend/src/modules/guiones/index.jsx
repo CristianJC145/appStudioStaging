@@ -45,7 +45,7 @@ const DEFAULT_CONFIG = {
   silence_thresh_db: -40,
   silence_min_ms: 80,
   max_chars_parrafo: 270,
-  min_chars_parrafo: 100,
+  min_chars_parrafo: 170,
 }
 
 const TABS = [
