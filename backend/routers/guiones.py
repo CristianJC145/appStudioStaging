@@ -818,48 +818,81 @@ def _cortar_por_timestamps(
 
 def _regenerar_afirm_individual(
     texto: str,
-    carpeta: Path,
-    indice: int,
     voice_speed: float,
     tempo_factor: float,
     cfg: Config,
 ) -> Optional["AudioSegment"]:
     """
-    Regenera una afirmación individual usando el texto de calentamiento como
-    filler (igual que intro/medit) para garantizar corte limpio en silencio
-    explícito.  No depende del grupo original ni de timestamps.
+    Regenera una afirmación individual usando /with-timestamps para obtener
+    un corte exacto por posición de carácter.
+
+    Si el calentamiento está activo se antepone al texto (sin break tags)
+    y se usa el timestamp del último carácter del warmup para cortar.
+    Esto evita depender de la detección de silencios o de break tags que
+    ElevenLabs puede no interpretar de forma consistente.
     """
-    fmt = getattr(cfg, "output_format", "mp3_44100_128") or "mp3_44100_128"
-    ruta = carpeta / f"afirm_regen_{indice:05d}_{hash_texto(texto, voice_speed, cfg.voice_settings.model_dump(), fmt)}.wav"
-    ruta.unlink(missing_ok=True)  # siempre fuerza regeneración
-
     usar_warmup = cfg.usar_calentamiento
-    if usar_warmup:
-        warmup_text = _get_warmup_text(cfg)
-        calentamiento_con_break = re.sub(
-            r'\s*$', ' <break time="2.0s"/>', warmup_text
-        )
-        texto_api = calentamiento_con_break + "\n\n" + texto
-    else:
-        texto_api = texto
+    warmup_text = _get_warmup_text(cfg) if usar_warmup else ""
+    texto_afirm = texto.strip()
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp.close()
-    tmp_path = Path(tmp.name)
-    try:
-        ok = texto_a_audio_api(texto_api, tmp_path, voice_speed, cfg,
-                               skip_punctuation_breaks=True)
-        if not ok:
-            return None
-        audio_raw = _load_audio(tmp_path, fmt)
-        audio = _trim_calentamiento(audio_raw) if usar_warmup else _trim_silence(audio_raw)
-        if tempo_factor != 1.0:
-            audio = aplicar_tempo(audio, tempo_factor)
-        if cfg.extend_silence:
-            audio = extender_silencios_internos(audio, cfg)
-        return audio
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    texto_completo = (warmup_text + "\n\n" + texto_afirm) if warmup_text else texto_afirm
+
+    url = (f"https://api.elevenlabs.io/v1/text-to-speech/"
+           f"{cfg.voice_id}/with-timestamps?output_format=mp3_44100_128")
+    headers = {"xi-api-key": cfg.api_key, "Content-Type": "application/json"}
+    payload = {
+        "text": texto_completo,
+        "model_id": cfg.model_id,
+        "language_code": cfg.language_code,
+        "voice_settings": {**cfg.voice_settings.model_dump(), "speed": voice_speed},
+    }
+
+    audio_raw: Optional["AudioSegment"] = None
+    characters: list[str] = []
+    char_end_ms: list[float] = []
+
+    for intento in range(1, 4):
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                audio_bytes = base64.b64decode(data["audio_base64"])
+                audio_raw = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+                alignment = data.get("alignment", {})
+                characters = alignment.get("characters", [])
+                char_end_ms = [t * 1000.0 for t in
+                               alignment.get("character_end_times_seconds", [])]
+                break
+        except Exception:
+            pass
+        time.sleep(2 ** intento)
+
+    if audio_raw is None:
+        return None
+
+    # Cortar el warmup usando el timestamp del último carácter del texto warmup
+    if warmup_text and characters and char_end_ms:
+        aligned_text = "".join(characters)
+        # Buscar la afirmación en el texto alineado a partir de la posición
+        # aproximada donde termina el warmup (tolerancia de 5 chars para el \n\n)
+        search_from = max(0, len(warmup_text) - 5)
+        pos = aligned_text.find(texto_afirm[:min(30, len(texto_afirm))], search_from)
+        if pos > 0:
+            # Cortar justo antes del primer carácter de la afirmación
+            cut_ms = int(char_end_ms[pos - 1])
+            audio_afirm = audio_raw[cut_ms:]
+        else:
+            # Fallback: tomar desde el punto medio del warmup estimado
+            audio_afirm = audio_raw
+    else:
+        audio_afirm = audio_raw
+
+    audio_afirm = _trim_silence(audio_afirm)
+    if tempo_factor != 1.0:
+        audio_afirm = aplicar_tempo(audio_afirm, tempo_factor)
+    if cfg.extend_silence:
+        audio_afirm = extender_silencios_internos(audio_afirm, cfg)
+    return audio_afirm
 
 
 # =============================================================
@@ -1089,7 +1122,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     # Regeneración individual con filler (warmup) para garantizar
                     # corte limpio en silencio explícito, independiente del grupo.
                     audio = _regenerar_afirm_individual(
-                        texto_afirm, carpeta, flat_i, cfg.afirm_voice_speed,
+                        texto_afirm, cfg.afirm_voice_speed,
                         cfg.afirm_tempo_factor, cfg
                     )
                     if audio:
