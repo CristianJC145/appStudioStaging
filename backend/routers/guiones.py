@@ -55,6 +55,9 @@ def _get_whisper_model():
 
 router = APIRouter(prefix="/api")
 
+# Contador de caracteres por hilo de generación (un job = un hilo)
+_job_ctx = threading.local()
+
 CARPETA_TEMP   = Path("temp_chunks")
 CARPETA_SALIDA = Path("salida")
 CARPETA_TEMP.mkdir(exist_ok=True)
@@ -461,11 +464,14 @@ def texto_a_audio_api(texto: str, ruta_salida: Path,
         "language_code": cfg.language_code,
         "voice_settings": {**cfg.voice_settings.model_dump(), "speed": voice_speed},
     }
+    chars_texto = len(re.sub(r'<[^>]+>', '', texto_tts))
     for intento in range(1, 4):
         try:
             r = requests.post(url, json=payload, headers=headers, timeout=60)
             if r.status_code == 200:
                 ruta_salida.write_bytes(r.content)
+                if hasattr(_job_ctx, 'chars_usados'):
+                    _job_ctx.chars_usados += chars_texto
                 return True
         except Exception:
             pass
@@ -790,6 +796,8 @@ def _cargar_grupo_afirm_timestamps(
                 ruta_json.write_text(json.dumps(
                     {"characters": characters, "char_end_ms": char_end_ms}
                 ))
+                if hasattr(_job_ctx, 'chars_usados'):
+                    _job_ctx.chars_usados += len(texto_grupo.strip())
                 return audio, characters, char_end_ms
         except Exception:
             pass
@@ -890,6 +898,8 @@ def _regenerar_afirm_individual(
                 characters = alignment.get("characters", [])
                 char_end_ms = [t * 1000.0 for t in
                                alignment.get("character_end_times_seconds", [])]
+                if hasattr(_job_ctx, 'chars_usados'):
+                    _job_ctx.chars_usados += len(texto_completo)
                 break
         except Exception:
             pass
@@ -996,8 +1006,8 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
         carpeta = CARPETA_TEMP / nombre
         carpeta.mkdir(parents=True, exist_ok=True)
 
-        # Créditos antes de iniciar
-        subscription_antes = _get_subscription_info(cfg.api_key)
+        # Inicializar contador de caracteres para este hilo
+        _job_ctx.chars_usados = 0
 
         secciones   = detectar_secciones(guion)
         tiene_intro = bool(secciones["intro"])
@@ -1283,12 +1293,11 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
         audio_final.export(str(ruta_salida), format="wav")
         mins = len(audio_final) / 60_000
 
-        # Créditos después de generar
-        subscription_despues = _get_subscription_info(cfg.api_key)
-        chars_usados = max(0, subscription_despues.get("character_count", 0)
-                           - subscription_antes.get("character_count", 0))
-        chars_restantes = subscription_despues.get("character_limit", 0) \
-                        - subscription_despues.get("character_count", 0)
+        # Créditos: suma acumulada de chars enviados + consulta final para restantes
+        chars_usados = getattr(_job_ctx, 'chars_usados', 0)
+        subscription_final = _get_subscription_info(cfg.api_key)
+        chars_restantes = subscription_final.get("character_limit", 0) \
+                        - subscription_final.get("character_count", 0)
 
         jobs[job_id]["status"]        = "done"
         jobs[job_id]["output_file"]   = str(ruta_salida)
@@ -1300,7 +1309,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
             "duration_mins": round(mins, 1),
             "chars_usados":    chars_usados,
             "chars_restantes": chars_restantes,
-            "chars_limite":    subscription_despues.get("character_limit", 0),
+            "chars_limite":    subscription_final.get("character_limit", 0),
         })
 
     except Exception as e:
