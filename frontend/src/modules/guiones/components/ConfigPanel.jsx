@@ -401,7 +401,7 @@ function CalibracionModal({ onClose, onApply, config = {} }) {
 
 /* ═══════════════════════════════════════════════════════════ */
 
-export default function ConfigPanel({ config, setConfig }) {
+export default function ConfigPanel({ config, setConfig, userId }) {
   const set = (key, val) => setConfig(prev => ({ ...prev, [key]: val }))
   const setVS = (key, val) =>
     setConfig(prev => ({ ...prev, voice_settings: { ...prev.voice_settings, [key]: val } }))
@@ -410,21 +410,30 @@ export default function ConfigPanel({ config, setConfig }) {
   const [loadingVoices, setLoadingVoices] = useState(false)
   const [showCalib, setShowCalib] = useState(false)
 
-  const [predefinedKeys, setPredefinedKeys]   = useState([])
+  const [predefinedKeys, setPredefinedKeys]     = useState([])
   const [selectedKeyIndex, setSelectedKeyIndex] = useState(-1)
-  const [accountInfo, setAccountInfo]         = useState(null)
-  const [loadingAccount, setLoadingAccount]   = useState(false)
+  const [accountInfo, setAccountInfo]           = useState(null)
+  const [loadingAccount, setLoadingAccount]     = useState(false)
 
-  useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_URL}/api/keys`)
-      .then(r => r.json())
-      .then(keys => setPredefinedKeys(keys))
-      .catch(() => {})
-  }, [])
-
-  const handleKeySelect = async (index) => {
+  const handleKeySelect = async (index, skipSave = false) => {
     setSelectedKeyIndex(index)
-    if (index < 0) return
+    if (index < 0) {
+      if (userId) {
+        fetch(`${import.meta.env.VITE_API_URL}/api/user-prefs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, key_index: -1 }),
+        }).catch(() => {})
+      }
+      return
+    }
+    if (!skipSave && userId) {
+      fetch(`${import.meta.env.VITE_API_URL}/api/user-prefs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, key_index: index }),
+      }).catch(() => {})
+    }
     setLoadingAccount(true)
     setAccountInfo(null)
     try {
@@ -435,6 +444,23 @@ export default function ConfigPanel({ config, setConfig }) {
     } catch {}
     setLoadingAccount(false)
   }
+
+  useEffect(() => {
+    const API = import.meta.env.VITE_API_URL
+    fetch(`${API}/api/keys`)
+      .then(r => r.json())
+      .then(async keys => {
+        setPredefinedKeys(keys)
+        if (!userId) return
+        const prefsRes = await fetch(`${API}/api/user-prefs?user_id=${encodeURIComponent(userId)}`)
+        const prefs    = prefsRes.ok ? await prefsRes.json() : {}
+        const idx      = typeof prefs.key_index === "number" ? prefs.key_index : -1
+        if (idx >= 0 && idx < keys.length) {
+          handleKeySelect(idx, true) // skipSave=true: ya está guardado en backend
+        }
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [openSections, setOpenSections] = useState(() => {
     try {

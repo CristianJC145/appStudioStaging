@@ -64,10 +64,12 @@ CARPETA_TEMP.mkdir(exist_ok=True)
 CARPETA_SALIDA.mkdir(exist_ok=True)
 
 # ── Persistencia: calibraciones y configuraciones ──────────────────────────
-CALIB_DIR   = Path("data") / "voice_calibrations"
-CONFIG_DIR  = Path("data") / "configs"
+CALIB_DIR       = Path("data") / "voice_calibrations"
+CONFIG_DIR      = Path("data") / "configs"
+USER_PREFS_DIR  = Path("data") / "user_prefs"
 CALIB_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+USER_PREFS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Claves predefinidas del equipo ───────────────────────────────────────────
 # Cada entrada: name (visible en UI), api_key (ElevenLabs), voice_id (voz a usar).
@@ -2024,6 +2026,31 @@ def get_voices(api_key: str):
     except Exception:
         pass
     return []
+
+
+class UserPrefsBody(BaseModel):
+    user_id: str
+    key_index: int
+
+@router.get("/user-prefs")
+def get_user_prefs(user_id: str):
+    if not user_id:
+        raise HTTPException(status_code=422, detail="user_id requerido")
+    path = USER_PREFS_DIR / f"{hashlib.sha256(user_id.encode()).hexdigest()[:24]}.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"key_index": -1}
+
+@router.post("/user-prefs")
+def save_user_prefs(body: UserPrefsBody):
+    if not body.user_id:
+        raise HTTPException(status_code=422, detail="user_id requerido")
+    path = USER_PREFS_DIR / f"{hashlib.sha256(body.user_id.encode()).hexdigest()[:24]}.json"
+    path.write_text(json.dumps({"key_index": body.key_index}, ensure_ascii=False), encoding="utf-8")
+    return {"ok": True}
 
 
 @router.get("/keys")

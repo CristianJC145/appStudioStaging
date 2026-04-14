@@ -366,7 +366,7 @@ export default function GuionesModule() {
               onGenerate={startGeneration}
               generating={generating}
             />
-            <ConfigPanel config={config} setConfig={saveConfig} />
+            <ConfigPanel config={config} setConfig={saveConfig} userId={userIdRef.current} />
           </div>
         )}
 
