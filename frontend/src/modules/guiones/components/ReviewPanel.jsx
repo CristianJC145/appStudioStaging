@@ -312,7 +312,7 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
 // ─────────────────────────────────────────────────────────────
 //  Panel de sección (Intro o Afirmaciones)
 // ─────────────────────────────────────────────────────────────
-function SectionReview({ section, label, items, audios, decisions, onDecision, onFinalize, jobStatus, isActive }) {
+function SectionReview({ section, label, items, audios, decisions, onDecision, onFinalize, jobStatus, isActive, regeneratingItems }) {
   const total    = items.length
   const decided  = Object.keys(decisions).length
   const approved = Object.values(decisions).filter(d => d === "ok").length
@@ -322,6 +322,21 @@ function SectionReview({ section, label, items, audios, decisions, onDecision, o
 
   // Puede finalizar cuando no hay ninguna en estado "regenerate" y todas decididas
   const canFinalize = decided === total && toRegen === 0
+
+  // Aprobar todos: disponible solo cuando todos los audios cargaron y no hay regeneraciones pendientes
+  const allAudiosLoaded   = items.every((_, i) => !!audios[i])
+  const anyRegenerating   = regeneratingItems.size > 0
+  const canApproveAll     = allAudiosLoaded && !anyRegenerating && jobStatus !== "building"
+
+  const handleApproveAll = () => {
+    items.forEach((_, i) => {
+      if (!audios[i]) return                  // sin audio, saltar
+      if (regeneratingItems.has(i)) return    // aún regenerando, saltar
+      if (!decisions[i] || decisions[i] === "regenerate") {
+        onDecision(section, i, "ok")
+      }
+    })
+  }
 
   return (
     <div>
@@ -370,10 +385,12 @@ function SectionReview({ section, label, items, audios, decisions, onDecision, o
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={() => items.forEach((_, i) => {
-                    if (!decisions[i]) onDecision(section, i, "ok")
-                  })}
-                  disabled={jobStatus === "building"}
+                  onClick={handleApproveAll}
+                  disabled={!canApproveAll}
+                  title={
+                    anyRegenerating   ? "Espera a que terminen las regeneraciones" :
+                    !allAudiosLoaded  ? "Espera a que carguen todos los audios"    : ""
+                  }
                 >
                   ✓ Aprobar todos
                 </button>
@@ -447,6 +464,7 @@ export default function ReviewPanel({
   introBloques, introAudios, introDecisions,
   afirmaciones, afirmAudios, afirmDecisions,
   meditaciones, meditAudios, meditDecisions,
+  introRegenerating, afirmRegenerating, meditRegenerating,
   onDecision, onFinalize, jobStatus
 }) {
   const hasIntro = introBloques.length > 0
@@ -506,6 +524,7 @@ export default function ReviewPanel({
           onFinalize={onFinalize}
           jobStatus={jobStatus}
           isActive={reviewSection === "intro"}
+          regeneratingItems={introRegenerating}
         />
       )}
 
@@ -528,6 +547,7 @@ export default function ReviewPanel({
           onFinalize={onFinalize}
           jobStatus={jobStatus}
           isActive={reviewSection === "afirm"}
+          regeneratingItems={afirmRegenerating}
         />
       )}
 
@@ -550,6 +570,7 @@ export default function ReviewPanel({
           onFinalize={onFinalize}
           jobStatus={jobStatus}
           isActive={reviewSection === "medit"}
+          regeneratingItems={meditRegenerating}
         />
       )}
     </div>
