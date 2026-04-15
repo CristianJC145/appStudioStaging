@@ -958,37 +958,74 @@ def _cortar_por_timestamps(
     Divide `audio` en exactamente len(lineas) segmentos usando los timestamps
     de caracteres devueltos por ElevenLabs.
 
-    Para cada afirmación (excepto la última) busca su texto en la cadena
-    reconstruida a partir de `characters` y usa el end_time de su último
-    carácter como punto de corte exacto.  Si el alignment no contiene
-    suficiente información hace un fallback a división equitativa.
+    Estrategia de corte (sin Whisper, sin CPU extra):
+      1. Normaliza a NFC ambos textos antes de buscar (soluciona NFD/NFC de ElevenLabs).
+      2. Si la búsqueda aún falla, calcula la posición proporcional por caracteres
+         y la refina buscando el mayor gap de tiempo en una ventana ±10% alrededor
+         de esa posición (los separadores \\n\\n crean un gap natural en los timestamps).
+      3. Añade 200 ms de cola fonética al corte final.
     """
+    import unicodedata
+
     if len(lineas) <= 1:
         return [audio]
 
     if not char_end_ms:
         dur = len(audio)
-        n = len(lineas)
+        n   = len(lineas)
         return [audio[i * dur // n: (i + 1) * dur // n] for i in range(n)]
 
-    aligned_text = "".join(characters)
-    segmentos: list["AudioSegment"] = []
-    cursor = 0
-    prev_ms = 0
+    TAIL_MS = 200
 
-    TAIL_MS = 200  # margen tras el último carácter para capturar la cola fonética
+    def _nfc(s: str) -> str:
+        return unicodedata.normalize("NFC", s)
+
+    aligned_nfc = _nfc("".join(characters))
+    n_ts        = len(char_end_ms)
+
+    # Longitud acumulada de cada afirmación en el texto enviado a ElevenLabs
+    sep         = "\n\n"
+    total_texto = sum(len(l) for l in lineas) + len(sep) * (len(lineas) - 1)
+
+    def _gap_refinado(est_idx: int) -> int:
+        """Busca el mayor salto temporal en ±10 % alrededor de est_idx."""
+        ventana   = max(5, int(n_ts * 0.10))
+        i_ini     = max(0, est_idx - ventana)
+        i_fin     = min(n_ts - 2, est_idx + ventana)
+        mejor_idx = est_idx
+        mejor_gap = -1
+        for i in range(i_ini, i_fin + 1):
+            gap = char_end_ms[i + 1] - char_end_ms[i] if i + 1 < n_ts else 0
+            if gap > mejor_gap:
+                mejor_gap = gap
+                mejor_idx = i
+        return mejor_idx
+
+    segmentos: list["AudioSegment"] = []
+    cursor   = 0
+    chars_ok = 0   # caracteres del texto original ya procesados
+    prev_ms  = 0
+
     for linea in lineas[:-1]:
-        pos = aligned_text.find(linea, cursor)
-        if pos == -1:
-            pos = cursor  # fallback: continuar desde donde estábamos
-        idx_fin = pos + len(linea) - 1
-        if idx_fin < len(char_end_ms):
-            cut_ms = min(int(char_end_ms[idx_fin]) + TAIL_MS, len(audio))
+        linea_nfc = _nfc(linea)
+        pos       = aligned_nfc.find(linea_nfc, cursor)
+
+        if pos != -1:
+            # Coincidencia exacta NFC — usar timestamp del último carácter
+            idx_fin = pos + len(linea_nfc) - 1
+            idx_fin = min(idx_fin, n_ts - 1)
+            cut_ms  = min(int(char_end_ms[idx_fin]) + TAIL_MS, len(audio))
+            cursor  = pos + len(linea_nfc)
         else:
-            cut_ms = len(audio)
+            # Sin coincidencia — estimación proporcional + refinado por gap
+            chars_ok += len(linea) + len(sep)
+            est_idx   = min(int(chars_ok / total_texto * n_ts), n_ts - 1)
+            idx_fin   = _gap_refinado(est_idx)
+            cut_ms    = min(int(char_end_ms[idx_fin]) + TAIL_MS, len(audio))
+            cursor   += len(linea_nfc) + len(sep)
+
         segmentos.append(audio[prev_ms:cut_ms])
         prev_ms = cut_ms
-        cursor = pos + len(linea)
 
     segmentos.append(audio[prev_ms:])
     return segmentos
@@ -1243,7 +1280,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                 )
 
                 if audio_grp and n_en_grupo > 1:
-                    raw_segs = _cortar_con_whisper(audio_grp, grupo_lineas)
+                    raw_segs = _cortar_por_timestamps(audio_grp, characters, char_end_ms, grupo_lineas)
                 elif audio_grp:
                     raw_segs = [audio_grp]
                 else:

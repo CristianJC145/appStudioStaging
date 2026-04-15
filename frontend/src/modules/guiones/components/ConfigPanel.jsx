@@ -788,7 +788,7 @@ export default function ConfigPanel({ config, setConfig, userId }) {
       <Section title="Avanzado" open={openSections["Avanzado"]} onToggle={() => toggleSection("Avanzado")}>
         <div style={{ marginTop: 6 }}>
           <NumInput label="Máx. caracteres por párrafo" value={config.max_chars_parrafo}
-            onChange={v => set("max_chars_parrafo", v)} min={100} max={800} />
+            onChange={v => set("max_chars_parrafo", v)} min={220} max={800} />
           <NumInput label="Mín. caracteres por bloque" value={config.min_chars_parrafo ?? 220}
             onChange={v => set("min_chars_parrafo", v)} min={0} max={500} />
           <NumInput label="Umbral silencio (dBFS)" value={config.silence_thresh_db}
