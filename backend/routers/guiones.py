@@ -72,21 +72,28 @@ CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 USER_PREFS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Claves predefinidas del equipo ───────────────────────────────────────────
-# Cada entrada: name (visible en UI), api_key (ElevenLabs), voice_id (voz a usar).
-# Agregar o modificar entradas según las claves del equipo.
-PREDEFINED_KEYS = [
-    {
-        "name": "Elevenlabs 1",
-        "api_key": "dd15fc77bf3a163f41e678cf29f8018fc0c43e756081a6e4dcbd6bc66ae5e251",
-        "voice_id": "3fRg3Y6XXL8gnxYFuN1z",
-    },
+# Se leen de backend/.env — nunca hardcodear aquí.
+# Formato en .env:
+#   ELEVENLABS_KEY_1_NAME=Nombre visible
+#   ELEVENLABS_KEY_1_API_KEY=sk-...
+#   ELEVENLABS_KEY_1_VOICE_ID=abc123
+#   ELEVENLABS_KEY_2_NAME=...  (continuar con 2, 3, 4...)
+def _load_predefined_keys() -> list[dict]:
+    keys = []
+    i = 1
+    while True:
+        api_key = os.getenv(f"ELEVENLABS_KEY_{i}_API_KEY", "").strip()
+        if not api_key:
+            break
+        keys.append({
+            "name":     os.getenv(f"ELEVENLABS_KEY_{i}_NAME",     f"Clave {i}"),
+            "api_key":  api_key,
+            "voice_id": os.getenv(f"ELEVENLABS_KEY_{i}_VOICE_ID", ""),
+        })
+        i += 1
+    return keys
 
-    {
-        "name": "Elevenlabs 2",
-        "api_key": "b0fc40540c7b02fee92991da921085b5c4aabb7d908bfb17e97123c3e9b286c6",
-        "voice_id": "0ZflTCV1dnNGRdqxOiW6",
-    },
-]
+PREDEFINED_KEYS = _load_predefined_keys()
 
 def _get_subscription_info(api_key: str) -> dict:
     """Consulta /v1/user/subscription de ElevenLabs y devuelve info de créditos."""

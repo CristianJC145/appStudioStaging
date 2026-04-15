@@ -3,6 +3,9 @@ Meditation Audio Studio — FastAPI Backend
 App principal: monta los routers de cada módulo.
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
