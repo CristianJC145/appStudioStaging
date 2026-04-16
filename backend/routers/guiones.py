@@ -841,22 +841,16 @@ def _cargar_grupo_afirm_timestamps(
     voice_speed: float,
     cfg: Config,
     force_regen: bool = False,
-) -> tuple[Optional["AudioSegment"], list[str], list[float]]:
-    """
-    Genera el audio de un grupo de afirmaciones llamando al endpoint
-    /with-timestamps de ElevenLabs.  El texto va limpio (sin breaks SSML)
-    y se cachean tanto el WAV como el alignment JSON.
+) -> tuple[Optional["AudioSegment"], list[str], list[float], list[float]]:
+    # ⬇️ NOTA: Ahora devolvemos 4 elementos (se añade char_start_ms)
 
-    Returns:
-        audio          — AudioSegment del grupo, o None si falló la API.
-        characters     — lista de caracteres tal como los devuelve ElevenLabs.
-        char_end_ms    — tiempo de fin en ms de cada carácter (mismo orden).
-    """
     settings_dict = cfg.voice_settings.model_dump()
-    # El endpoint with-timestamps siempre devuelve audio en el formato pedido;
-    # usamos mp3_44100_128 para que la decodificación sea siempre igual.
     api_fmt = "mp3_44100_128"
-    h = hash_texto(texto_grupo, voice_speed, settings_dict, api_fmt + "_ts")
+    
+    # Reemplazamos los saltos de línea por puntos suspensivos para forzar el silencio en el TTS
+    texto_tts = texto_grupo.strip().replace("\n\n", "\n\n...\n\n")
+    
+    h = hash_texto(texto_tts, voice_speed, settings_dict, api_fmt + "_ts")
     ruta_wav  = carpeta / f"afirm_grp_{indice:05d}_{h}.wav"
     ruta_json = carpeta / f"afirm_grp_{indice:05d}_{h}_align.json"
 
@@ -864,12 +858,12 @@ def _cargar_grupo_afirm_timestamps(
         ruta_wav.unlink(missing_ok=True)
         ruta_json.unlink(missing_ok=True)
 
-    # Cargar de caché si ambos ficheros existen
+    # Cargar de caché
     if ruta_wav.exists() and ruta_json.exists():
         try:
             audio = AudioSegment.from_file(str(ruta_wav))
             align = json.loads(ruta_json.read_text())
-            return audio, align["characters"], align["char_end_ms"]
+            return audio, align["characters"], align["char_start_ms"], align["char_end_ms"]
         except Exception:
             pass  # caché corrupta → regenerar
 
@@ -877,7 +871,7 @@ def _cargar_grupo_afirm_timestamps(
            f"{cfg.voice_id}/with-timestamps?output_format={api_fmt}")
     headers = {"xi-api-key": cfg.api_key, "Content-Type": "application/json"}
     payload = {
-        "text": texto_grupo.strip(),
+        "text": texto_tts, # Enviamos el texto con los ...
         "model_id": cfg.model_id,
         "language_code": cfg.language_code,
         "voice_settings": {**cfg.voice_settings.model_dump(), "speed": voice_speed},
@@ -892,22 +886,23 @@ def _cargar_grupo_afirm_timestamps(
                 audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
                 alignment = data.get("alignment", {})
                 characters = alignment.get("characters", [])
-                char_end_ms = [t * 1000.0 for t in
-                               alignment.get("character_end_times_seconds", [])]
-                # Persistir en caché
+                
+                # Extraemos ambos tiempos
+                char_start_ms = [t * 1000.0 for t in alignment.get("character_start_times_seconds", [])]
+                char_end_ms   = [t * 1000.0 for t in alignment.get("character_end_times_seconds", [])]
+                
                 audio.export(str(ruta_wav), format="wav")
                 ruta_json.write_text(json.dumps(
-                    {"characters": characters, "char_end_ms": char_end_ms}
+                    {"characters": characters, "char_start_ms": char_start_ms, "char_end_ms": char_end_ms}
                 ))
                 if hasattr(_job_ctx, 'chars_usados'):
                     _job_ctx.chars_usados += len(texto_grupo.strip())
-                return audio, characters, char_end_ms
+                return audio, characters, char_start_ms, char_end_ms
         except Exception:
             pass
         time.sleep(2 ** intento)
 
-    return None, [], []
-
+    return None, [], [], []
 
 def _normalizar_palabra(w: str) -> str:
     """Minúsculas sin acentos ni puntuación — para matching tolerante."""
@@ -1040,85 +1035,89 @@ def _cortar_con_whisper(
 def _cortar_por_timestamps(
     audio: "AudioSegment",
     characters: list[str],
+    char_start_ms: list[float],
     char_end_ms: list[float],
     lineas: list[str],
 ) -> list["AudioSegment"]:
-    """
-    Divide `audio` en exactamente len(lineas) segmentos usando los timestamps
-    de caracteres devueltos por ElevenLabs.
-
-    Estrategia de corte (sin Whisper, sin CPU extra):
-      1. Normaliza a NFC ambos textos antes de buscar (soluciona NFD/NFC de ElevenLabs).
-      2. Si la búsqueda aún falla, calcula la posición proporcional por caracteres
-         y la refina buscando el mayor gap de tiempo en una ventana ±10% alrededor
-         de esa posición (los separadores \\n\\n crean un gap natural en los timestamps).
-      3. Añade 200 ms de cola fonética al corte final.
-    """
     import unicodedata
+    import re
 
     if len(lineas) <= 1:
         return [audio]
 
-    if not char_end_ms:
+    if not char_end_ms or not char_start_ms:
         dur = len(audio)
         n   = len(lineas)
         return [audio[i * dur // n: (i + 1) * dur // n] for i in range(n)]
 
-    TAIL_MS = 200
+    def _limpiar(s: str) -> str:
+        """Remueve todo excepto letras y números para un mapeo infalible."""
+        s = unicodedata.normalize("NFC", s.lower())
+        return re.sub(r'[^\w]', '', s)
 
-    def _nfc(s: str) -> str:
-        return unicodedata.normalize("NFC", s)
+    # 1. Crear un string limpio de los caracteres de ElevenLabs y un mapa de sus índices originales
+    clean_chars = []
+    char_to_orig_idx = []
+    for i, c in enumerate(characters):
+        cl = _limpiar(c)
+        if cl:
+            clean_chars.append(cl)
+            char_to_orig_idx.append(i)
 
-    aligned_nfc = _nfc("".join(characters))
-    n_ts        = len(char_end_ms)
+    clean_text = "".join(clean_chars)
 
-    # Longitud acumulada de cada afirmación en el texto enviado a ElevenLabs
-    sep         = "\n\n"
-    total_texto = sum(len(l) for l in lineas) + len(sep) * (len(lineas) - 1)
+    # 2. Encontrar el índice original de inicio y fin para cada afirmación
+    segment_indices = []
+    cursor = 0
+    for linea in lineas:
+        cl_linea = _limpiar(linea)
+        if not cl_linea:
+            segment_indices.append(None)
+            continue
 
-    def _gap_refinado(est_idx: int) -> int:
-        """Busca el mayor salto temporal en ±10 % alrededor de est_idx."""
-        ventana   = max(5, int(n_ts * 0.10))
-        i_ini     = max(0, est_idx - ventana)
-        i_fin     = min(n_ts - 2, est_idx + ventana)
-        mejor_idx = est_idx
-        mejor_gap = -1
-        for i in range(i_ini, i_fin + 1):
-            gap = char_end_ms[i + 1] - char_end_ms[i] if i + 1 < n_ts else 0
-            if gap > mejor_gap:
-                mejor_gap = gap
-                mejor_idx = i
-        return mejor_idx
-
-    segmentos: list["AudioSegment"] = []
-    cursor   = 0
-    chars_ok = 0   # caracteres del texto original ya procesados
-    prev_ms  = 0
-
-    for linea in lineas[:-1]:
-        linea_nfc = _nfc(linea)
-        pos       = aligned_nfc.find(linea_nfc, cursor)
-
+        pos = clean_text.find(cl_linea, cursor)
         if pos != -1:
-            # Coincidencia exacta NFC — usar timestamp del último carácter
-            idx_fin = pos + len(linea_nfc) - 1
-            idx_fin = min(idx_fin, n_ts - 1)
-            cut_ms  = min(int(char_end_ms[idx_fin]) + TAIL_MS, len(audio))
-            cursor  = pos + len(linea_nfc)
+            start_orig = char_to_orig_idx[pos]
+            end_orig = char_to_orig_idx[pos + len(cl_linea) - 1]
+            segment_indices.append((start_orig, end_orig))
+            cursor = pos + len(cl_linea)
         else:
-            # Sin coincidencia — estimación proporcional + refinado por gap
-            chars_ok += len(linea) + len(sep)
-            est_idx   = min(int(chars_ok / total_texto * n_ts), n_ts - 1)
-            idx_fin   = _gap_refinado(est_idx)
-            cut_ms    = min(int(char_end_ms[idx_fin]) + TAIL_MS, len(audio))
-            cursor   += len(linea_nfc) + len(sep)
+            segment_indices.append(None)
 
-        segmentos.append(audio[prev_ms:cut_ms])
-        prev_ms = cut_ms
+    # 3. Cortar el audio exactamente en la mitad de los silencios entre frases
+    segmentos: list["AudioSegment"] = []
+    prev_cut_ms = 0
 
-    segmentos.append(audio[prev_ms:])
+    for i in range(len(lineas) - 1):
+        curr_seg = segment_indices[i]
+        next_seg = segment_indices[i + 1]
+
+        if curr_seg and next_seg:
+            _, end_curr = curr_seg
+            start_next, _ = next_seg
+            
+            # Tiempos: Final de la palabra actual y el inicio de la palabra siguiente
+            fin_ms = char_end_ms[end_curr]
+            ini_ms = char_start_ms[start_next]
+
+            # Cortamos justo en la mitad. Si hay anomalía y se solapan, dejamos un margen de 50ms
+            if ini_ms > fin_ms:
+                cut_ms = int((fin_ms + ini_ms) / 2)
+            else:
+                cut_ms = int(fin_ms) + 50
+        else:
+            # Fallback proporcional en caso extremo de que no se encuentre la línea
+            total_chars = sum(len(l) for l in lineas)
+            done_chars = sum(len(l) for l in lineas[:i + 1])
+            cut_ms = int(len(audio) * done_chars / total_chars)
+
+        cut_ms = min(cut_ms, len(audio))
+        segmentos.append(audio[prev_cut_ms:cut_ms])
+        prev_cut_ms = cut_ms
+
+    # Agregar la última afirmación
+    segmentos.append(audio[prev_cut_ms:])
     return segmentos
-
 
 def _regenerar_afirm_individual(
     texto: str,
@@ -1373,12 +1372,12 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     "message": f"Afirmación {flat_idx + 1}/{len(afirmaciones)}"
                 })
 
-                audio_grp, characters, char_end_ms = _cargar_grupo_afirm_timestamps(
+                audio_grp, characters, char_start_ms, char_end_ms = _cargar_grupo_afirm_timestamps(
                     grupo_texto, carpeta, i, cfg.afirm_voice_speed, cfg
                 )
 
                 if audio_grp and n_en_grupo > 1:
-                    raw_segs = _cortar_por_timestamps(audio_grp, characters, char_end_ms, grupo_lineas)
+                    raw_segs = _cortar_por_timestamps(audio_grp, characters, char_start_ms, char_end_ms, grupo_lineas)
                 elif audio_grp:
                     raw_segs = [audio_grp]
                 else:
