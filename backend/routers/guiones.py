@@ -457,7 +457,6 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
             cfg.usar_calentamiento
             and prefijo in ("intro", "medit")
         )
-        es_intro_medit = prefijo in ("intro", "medit", "afirm")
         if usar_warmup:
             warmup_text = _warmup_intro_medit(cfg)
             calentamiento_con_break = re.sub(r'\s*$', ' <break time="2.0s"/>', warmup_text)
@@ -540,16 +539,18 @@ def _clasificar_en_bg(
         return
 
     def _task():
-        user_id  = jobs.get(job_id, {}).get("user_id")
-        segmento = _SEG_MAP_CLS.get(section, section)
+        job_meta      = jobs.get(job_id, {})
+        user_id       = job_meta.get("user_id")
+        language_code = job_meta.get("language_code", "es")
+        segmento      = _SEG_MAP_CLS.get(section, section)
 
         def _on_features(features):
             if not user_id:
                 return
-            umbral = obtener_umbral(user_id, segmento)
+            umbral = obtener_umbral(user_id, segmento, language_code)
             if umbral == "sin_datos":
                 return
-            resultado = clasificar_audio(user_id, segmento, features, texto)
+            resultado = clasificar_audio(user_id, segmento, features, texto, language_code)
             if resultado.get("decision") is not None:
                 emit_event(job_id, f"{section}_classified", {
                     "index":     index,
@@ -578,6 +579,7 @@ def _guardar_decision_clasificador(
     if not CLASSIFIER_AVAILABLE or not user_id:
         return
     try:
+        language_code = jobs.get(job_id, {}).get("language_code", "es")
         segmento = _SEG_MAP_CLS.get(section, section)
         decision = _DEC_MAP_CLS.get(decision_str, "rechazado")
         features = get_cached_features(job_id, section, index)
@@ -587,8 +589,9 @@ def _guardar_decision_clasificador(
             user_id, segmento, features, decision,
             intento=1,
             params_elevenlabs=features.get("params_elevenlabs") or {},
+            language_code=language_code,
         )
-        verificar_y_regenerar_resumen(user_id, segmento)
+        verificar_y_regenerar_resumen(user_id, segmento, language_code)
     except Exception as exc:
         print(f"[guiones] _guardar_decision_clasificador error: {exc}")
 
@@ -1194,11 +1197,13 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
         idioma_detectado = _detectar_idioma(guion)
         if idioma_detectado and idioma_detectado != cfg.language_code:
             cfg.language_code = idioma_detectado
+        jobs[job_id]["language_code"] = cfg.language_code
 
         emit_event(job_id, "start", {
-            "tiene_intro": tiene_intro,
-            "tiene_afirm": tiene_afirm,
-            "tiene_medit": tiene_medit,
+            "tiene_intro":   tiene_intro,
+            "tiene_afirm":   tiene_afirm,
+            "tiene_medit":   tiene_medit,
+            "language_code": cfg.language_code,
             "message": "Iniciando generación..."
         })
 

@@ -28,7 +28,7 @@ def _get_conn():
 
 
 def ensure_tables():
-    """Create classifier tables if they don't exist."""
+    """Create classifier tables if they don't exist, run column migrations."""
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
@@ -37,6 +37,7 @@ def ensure_tables():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     segmento ENUM('intro', 'meditacion', 'afirmaciones') NOT NULL,
+                    language_code VARCHAR(10) NOT NULL DEFAULT 'es',
                     texto_original TEXT NOT NULL,
                     texto_transcrito TEXT,
                     coincidencia_texto FLOAT,
@@ -54,6 +55,7 @@ def ensure_tables():
                     numero_ejemplos_al_momento INT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_user_segmento (user_id, segmento),
+                    INDEX idx_user_segmento_lang (user_id, segmento, language_code),
                     INDEX idx_decision (decision)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
@@ -62,14 +64,54 @@ def ensure_tables():
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     user_id INT NOT NULL,
                     segmento ENUM('intro', 'meditacion', 'afirmaciones') NOT NULL,
+                    language_code VARCHAR(10) NOT NULL DEFAULT 'es',
                     version INT DEFAULT 1,
                     ejemplos_procesados INT DEFAULT 0,
                     resumen_json JSON,
                     umbral_actual ENUM('sin_datos', 'aceptable', 'bueno', 'excelente', 'pro') DEFAULT 'sin_datos',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY unique_user_segmento (user_id, segmento)
+                    UNIQUE KEY unique_user_seg_lang (user_id, segmento, language_code)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+
+            # Migration: add language_code column to classifier_dataset if missing
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'classifier_dataset'
+                AND COLUMN_NAME = 'language_code'
+            """)
+            if cur.fetchone()["cnt"] == 0:
+                cur.execute(
+                    "ALTER TABLE classifier_dataset "
+                    "ADD COLUMN language_code VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento"
+                )
+                cur.execute(
+                    "ALTER TABLE classifier_dataset "
+                    "ADD INDEX idx_user_segmento_lang (user_id, segmento, language_code)"
+                )
+
+            # Migration: add language_code column to classifier_resumen if missing
+            cur.execute("""
+                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'classifier_resumen'
+                AND COLUMN_NAME = 'language_code'
+            """)
+            if cur.fetchone()["cnt"] == 0:
+                cur.execute(
+                    "ALTER TABLE classifier_resumen "
+                    "ADD COLUMN language_code VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento"
+                )
+                try:
+                    cur.execute("ALTER TABLE classifier_resumen DROP INDEX unique_user_segmento")
+                except Exception:
+                    pass
+                cur.execute(
+                    "ALTER TABLE classifier_resumen "
+                    "ADD UNIQUE KEY unique_user_seg_lang (user_id, segmento, language_code)"
+                )
+
         conn.close()
     except Exception as e:
         print(f"[classifier.storage] DB init warning: {e}")
@@ -108,32 +150,33 @@ def guardar_ejemplo(
     decision: str,
     intento: int = 1,
     params_elevenlabs: dict = None,
+    language_code: str = "es",
 ) -> bool:
     """Save a training example to the dataset."""
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM classifier_dataset WHERE user_id=%s AND segmento=%s",
-                (user_id, segmento),
+                "SELECT COUNT(*) AS cnt FROM classifier_dataset "
+                "WHERE user_id=%s AND segmento=%s AND language_code=%s",
+                (user_id, segmento, language_code),
             )
             row = cur.fetchone()
             n_actual = (row["cnt"] if row else 0) + 1
 
-            # Normalize decision
             decision_norm = "aprobado" if decision in ("ok", "aprobado") else "rechazado"
 
             cur.execute(
                 """
                 INSERT INTO classifier_dataset
-                (user_id, segmento, texto_original, texto_transcrito, coincidencia_texto,
-                 duracion_seg, tempo_bpm, energia_promedio, variacion_pitch,
+                (user_id, segmento, language_code, texto_original, texto_transcrito,
+                 coincidencia_texto, duracion_seg, tempo_bpm, energia_promedio, variacion_pitch,
                  num_silencios, duracion_promedio_silencio_seg, energia_max, energia_min,
                  params_elevenlabs, decision, intento_numero, numero_ejemplos_al_momento)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
-                    user_id, segmento,
+                    user_id, segmento, language_code,
                     datos_features.get("texto_original", ""),
                     datos_features.get("texto_transcrito"),
                     datos_features.get("coincidencia_texto"),
@@ -155,13 +198,13 @@ def guardar_ejemplo(
             umbral = _compute_umbral(n_actual)
             cur.execute(
                 """
-                INSERT INTO classifier_resumen (user_id, segmento, ejemplos_procesados, umbral_actual)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO classifier_resumen (user_id, segmento, language_code, ejemplos_procesados, umbral_actual)
+                VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     ejemplos_procesados = %s,
                     umbral_actual = %s
                 """,
-                (user_id, segmento, n_actual, umbral, n_actual, umbral),
+                (user_id, segmento, language_code, n_actual, umbral, n_actual, umbral),
             )
         conn.close()
         return True
@@ -170,14 +213,15 @@ def guardar_ejemplo(
         return False
 
 
-def obtener_conteo_por_segmento(user_id: int) -> dict:
-    """Returns {intro: n, meditacion: n, afirmaciones: n}"""
+def obtener_conteo_por_segmento(user_id: int, language_code: str = "es") -> dict:
+    """Returns {intro: n, meditacion: n, afirmaciones: n} for the given language."""
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT segmento, COUNT(*) AS cnt FROM classifier_dataset WHERE user_id=%s GROUP BY segmento",
-                (user_id,),
+                "SELECT segmento, COUNT(*) AS cnt FROM classifier_dataset "
+                "WHERE user_id=%s AND language_code=%s GROUP BY segmento",
+                (user_id, language_code),
             )
             rows = cur.fetchall()
         conn.close()
@@ -190,13 +234,14 @@ def obtener_conteo_por_segmento(user_id: int) -> dict:
         return {"intro": 0, "meditacion": 0, "afirmaciones": 0}
 
 
-def obtener_umbral(user_id: int, segmento: str) -> str:
+def obtener_umbral(user_id: int, segmento: str, language_code: str = "es") -> str:
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT umbral_actual FROM classifier_resumen WHERE user_id=%s AND segmento=%s",
-                (user_id, segmento),
+                "SELECT umbral_actual FROM classifier_resumen "
+                "WHERE user_id=%s AND segmento=%s AND language_code=%s",
+                (user_id, segmento, language_code),
             )
             row = cur.fetchone()
         conn.close()
@@ -205,7 +250,9 @@ def obtener_umbral(user_id: int, segmento: str) -> str:
         return "sin_datos"
 
 
-def obtener_ejemplos_para_resumen(user_id: int, segmento: str, limit: int = 200) -> list:
+def obtener_ejemplos_para_resumen(
+    user_id: int, segmento: str, limit: int = 200, language_code: str = "es"
+) -> list:
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
@@ -216,11 +263,11 @@ def obtener_ejemplos_para_resumen(user_id: int, segmento: str, limit: int = 200)
                        num_silencios, duracion_promedio_silencio_seg, energia_max, energia_min,
                        params_elevenlabs, decision, intento_numero
                 FROM classifier_dataset
-                WHERE user_id=%s AND segmento=%s
+                WHERE user_id=%s AND segmento=%s AND language_code=%s
                 ORDER BY created_at DESC
                 LIMIT %s
                 """,
-                (user_id, segmento, limit),
+                (user_id, segmento, language_code, limit),
             )
             rows = cur.fetchall()
         conn.close()
@@ -229,7 +276,9 @@ def obtener_ejemplos_para_resumen(user_id: int, segmento: str, limit: int = 200)
         return []
 
 
-def guardar_resumen(user_id: int, segmento: str, resumen_json: dict, version: int) -> bool:
+def guardar_resumen(
+    user_id: int, segmento: str, resumen_json: dict, version: int, language_code: str = "es"
+) -> bool:
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
@@ -238,8 +287,8 @@ def guardar_resumen(user_id: int, segmento: str, resumen_json: dict, version: in
             cur.execute(
                 """
                 INSERT INTO classifier_resumen
-                    (user_id, segmento, version, resumen_json, ejemplos_procesados, umbral_actual)
-                VALUES (%s,%s,%s,%s,%s,%s)
+                    (user_id, segmento, language_code, version, resumen_json, ejemplos_procesados, umbral_actual)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
                 ON DUPLICATE KEY UPDATE
                     version             = %s,
                     resumen_json        = %s,
@@ -247,7 +296,7 @@ def guardar_resumen(user_id: int, segmento: str, resumen_json: dict, version: in
                     umbral_actual       = %s
                 """,
                 (
-                    user_id, segmento, version, json.dumps(resumen_json), n, umbral,
+                    user_id, segmento, language_code, version, json.dumps(resumen_json), n, umbral,
                     version, json.dumps(resumen_json), n, umbral,
                 ),
             )
@@ -258,13 +307,14 @@ def guardar_resumen(user_id: int, segmento: str, resumen_json: dict, version: in
         return False
 
 
-def obtener_resumen(user_id: int, segmento: str) -> dict | None:
+def obtener_resumen(user_id: int, segmento: str, language_code: str = "es") -> dict | None:
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT resumen_json, version, ejemplos_procesados, umbral_actual FROM classifier_resumen WHERE user_id=%s AND segmento=%s",
-                (user_id, segmento),
+                "SELECT resumen_json, version, ejemplos_procesados, umbral_actual "
+                "FROM classifier_resumen WHERE user_id=%s AND segmento=%s AND language_code=%s",
+                (user_id, segmento, language_code),
             )
             row = cur.fetchone()
         conn.close()
@@ -280,15 +330,16 @@ def obtener_resumen(user_id: int, segmento: str) -> dict | None:
         return None
 
 
-def obtener_status_completo(user_id: int) -> dict:
-    """Returns full learning status for all segments."""
+def obtener_status_completo(user_id: int, language_code: str = "es") -> dict:
+    """Returns full learning status for all segments in the given language."""
     try:
-        conteos = obtener_conteo_por_segmento(user_id)
+        conteos = obtener_conteo_por_segmento(user_id, language_code)
         conn = _get_conn()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT segmento, umbral_actual, version FROM classifier_resumen WHERE user_id=%s",
-                (user_id,),
+                "SELECT segmento, umbral_actual, version FROM classifier_resumen "
+                "WHERE user_id=%s AND language_code=%s",
+                (user_id, language_code),
             )
             rows = cur.fetchall()
         conn.close()

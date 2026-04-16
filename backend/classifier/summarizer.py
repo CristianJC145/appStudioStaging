@@ -31,15 +31,15 @@ _last_summarized      : dict[str, int] = {}
 _last_summarized_lock = threading.Lock()
 
 
-def verificar_y_regenerar_resumen(user_id: int, segmento: str):
+def verificar_y_regenerar_resumen(user_id: int, segmento: str, language_code: str = "es"):
     """
     Check if a new summary is needed (every 20 new examples, min 30 total).
     If so, spawn a background thread to regenerate it.
     Safe to call from any thread.
     """
-    key = f"{user_id}_{segmento}"
+    key = f"{user_id}_{segmento}_{language_code}"
     try:
-        conteos  = obtener_conteo_por_segmento(user_id)
+        conteos  = obtener_conteo_por_segmento(user_id, language_code)
         n_actual = conteos.get(segmento, 0)
 
         if n_actual < 30:
@@ -53,24 +53,24 @@ def verificar_y_regenerar_resumen(user_id: int, segmento: str):
 
         threading.Thread(
             target=_generar_resumen,
-            args=(user_id, segmento, n_actual),
+            args=(user_id, segmento, n_actual, language_code),
             daemon=True,
         ).start()
     except Exception as exc:
         print(f"[classifier.summarizer] verificar error: {exc}")
 
 
-def _generar_resumen(user_id: int, segmento: str, n_actual: int):
+def _generar_resumen(user_id: int, segmento: str, n_actual: int, language_code: str = "es"):
     """Build and persist a new distilled summary via Claude API."""
     if not ANTHROPIC_AVAILABLE or not ANTHROPIC_API_KEY:
         return
 
     try:
-        ejemplos = obtener_ejemplos_para_resumen(user_id, segmento, limit=200)
+        ejemplos = obtener_ejemplos_para_resumen(user_id, segmento, limit=200, language_code=language_code)
         if len(ejemplos) < 20:
             return
 
-        resumen_previo = obtener_resumen(user_id, segmento)
+        resumen_previo = obtener_resumen(user_id, segmento, language_code)
         version        = (resumen_previo.get("_version", 0) + 1) if resumen_previo else 1
 
         aprobados  = [e for e in ejemplos if e.get("decision") == "aprobado"]
@@ -153,10 +153,10 @@ def _generar_resumen(user_id: int, segmento: str, n_actual: int):
             raw = raw.strip()
 
         nuevo = json.loads(raw)
-        guardar_resumen(user_id, segmento, nuevo, version)
+        guardar_resumen(user_id, segmento, nuevo, version, language_code)
         print(
             f"[classifier.summarizer] Resumen v{version} generado "
-            f"para user={user_id} segmento={segmento}"
+            f"para user={user_id} segmento={segmento} lang={language_code}"
         )
 
     except Exception as exc:

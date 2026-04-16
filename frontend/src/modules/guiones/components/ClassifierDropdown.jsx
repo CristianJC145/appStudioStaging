@@ -15,6 +15,12 @@ const SEG_ENTRIES = [
   { key: "afirmaciones", label: "Afirmaciones" },
   { key: "meditacion",   label: "Meditación"  },
 ]
+const LANGUAGES = [
+  { value: "es", label: "Español" },
+  { value: "en", label: "English" },
+  { value: "pt", label: "Português" },
+  { value: "fr", label: "Français" },
+]
 
 // ─── Helpers ──────────────────────────────────────────────────
 function bestUmbral(status) {
@@ -49,7 +55,7 @@ function AiIcon({ size = 18 }) {
 }
 
 // ─── Main component ───────────────────────────────────────────
-export default function ClassifierDropdown({ status, autonomousMode, onAutonomousChange }) {
+export default function ClassifierDropdown({ status, autonomousMode, onAutonomousChange, classifierLanguage, onLanguageChange }) {
   const [open, setOpen]   = useState(false)
   const panelRef          = useRef(null)
   const fabRef            = useRef(null)
@@ -101,11 +107,22 @@ export default function ClassifierDropdown({ status, autonomousMode, onAutonomou
             <span className="clf-fab-header-title">Clasificador IA</span>
             <span className="clf-fab-header-sub">Aprendizaje progresivo</span>
           </div>
-          {totalExamples > 0 && (
-            <span className="clf-fab-header-badge">
-              {totalExamples} ej.
-            </span>
-          )}
+          <div className="clf-fab-header-right">
+            {totalExamples > 0 && (
+              <span className="clf-fab-header-badge">{totalExamples} ej.</span>
+            )}
+            <select
+              className="clf-lang-select"
+              value={classifierLanguage || "es"}
+              onChange={e => onLanguageChange?.(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              title="Idioma del clasificador"
+            >
+              {LANGUAGES.map(l => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="clf-fab-divider" />

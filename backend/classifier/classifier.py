@@ -33,6 +33,7 @@ def clasificar_audio(
     segmento: str,
     features: dict,
     texto: str,
+    language_code: str = "es",
 ) -> dict:
     """
     Classify an audio fragment against the user's learned preferences.
@@ -50,11 +51,11 @@ def clasificar_audio(
         return _RESULT_SIN_DATOS
 
     try:
-        umbral = obtener_umbral(user_id, segmento)
+        umbral = obtener_umbral(user_id, segmento, language_code)
         if umbral == "sin_datos":
             return _RESULT_SIN_DATOS
 
-        resumen = obtener_resumen(user_id, segmento)
+        resumen = obtener_resumen(user_id, segmento, language_code)
         if not resumen:
             return {**_RESULT_SIN_DATOS, "modo": umbral}
 

@@ -2149,6 +2149,12 @@ input[type="range"]:hover::-webkit-slider-thumb {
   gap: 10px;
   padding: 13px 14px 11px;
 }
+.clf-fab-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .clf-fab-header-icon {
   display: flex;
   align-items: center;
@@ -2191,6 +2197,31 @@ input[type="range"]:hover::-webkit-slider-thumb {
   padding: 2px 9px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.clf-lang-select {
+  font-size: 0.58rem;
+  font-family: var(--ff-mono);
+  color: rgba(74, 184, 212, 0.8);
+  background: rgba(74, 184, 212, 0.06);
+  border: 1px solid rgba(74, 184, 212, 0.15);
+  border-radius: 5px;
+  padding: 2px 5px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 80px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.clf-lang-select:hover,
+.clf-lang-select:focus {
+  border-color: rgba(74, 184, 212, 0.4);
+  background: rgba(74, 184, 212, 0.1);
+}
+.clf-lang-select option {
+  background: #0c1a22;
+  color: #c8d8e0;
 }
 
 /* Divisor */

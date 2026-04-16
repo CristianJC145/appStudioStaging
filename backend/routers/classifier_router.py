@@ -9,7 +9,7 @@ GET  /classifier/resumen/{user_id}/{segmento}
 import threading
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 try:
@@ -42,21 +42,22 @@ class EvaluateBody(BaseModel):
 
 
 class FeedbackBody(BaseModel):
-    job_id:  str
-    section: str
-    index:   int
-    decision: str
-    user_id: Optional[int] = None
+    job_id:        str
+    section:       str
+    index:         int
+    decision:      str
+    user_id:       Optional[int] = None
+    language_code: str = "es"
 
 
 @router.get("/status/{user_id}")
-def get_classifier_status(user_id: int):
-    """Learning status for all segments of a user."""
+def get_classifier_status(user_id: int, language_code: str = Query("es")):
+    """Learning status for all segments of a user, filtered by language."""
     if not CLASSIFIER_AVAILABLE:
-        return {"user_id": user_id, "segmentos": {}}
+        return {"user_id": user_id, "segmentos": {}, "language_code": language_code}
     try:
-        status = obtener_status_completo(user_id)
-        return {"user_id": user_id, "segmentos": status}
+        status = obtener_status_completo(user_id, language_code)
+        return {"user_id": user_id, "segmentos": status, "language_code": language_code}
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
@@ -94,11 +95,12 @@ def register_feedback(body: FeedbackBody):
             user_id, segmento, features, decision,
             intento=1,
             params_elevenlabs=features.get("params_elevenlabs") or {},
+            language_code=body.language_code,
         )
         if ok:
             threading.Thread(
                 target=verificar_y_regenerar_resumen,
-                args=(user_id, segmento),
+                args=(user_id, segmento, body.language_code),
                 daemon=True,
             ).start()
         return {"ok": ok}

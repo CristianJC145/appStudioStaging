@@ -140,11 +140,13 @@ export default function GuionesModule() {
 
   // ── Classifier state ───────────────────────────────────────────────────────
   // classifierEvents: { "intro_0": {confianza, decision, razon, modo}, ... }
-  const [classifierEvents,  setClassifierEvents]  = useState({})
+  const [classifierEvents,    setClassifierEvents]    = useState({})
   // classifierStatus: { intro: {ejemplos, umbral, siguiente_umbral}, afirmaciones: {}, meditacion: {} }
-  const [classifierStatus,  setClassifierStatus]  = useState(null)
+  const [classifierStatus,    setClassifierStatus]    = useState(null)
   // autonomousMode: { intro: bool, afirmaciones: bool, meditacion: bool }
-  const [autonomousMode,    setAutonomousMode]     = useState({ intro: false, afirmaciones: false, meditacion: false })
+  const [autonomousMode,      setAutonomousMode]      = useState({ intro: false, afirmaciones: false, meditacion: false })
+  // classifierLanguage: active language for classifier display; starts from config, overridden by auto-detection
+  const [classifierLanguage,  setClassifierLanguage]  = useState(config.language_code || "es")
 
   const esRef              = useRef(null)
   const saveTimerRef       = useRef(null)
@@ -185,6 +187,11 @@ export default function GuionesModule() {
     es.onmessage = (e) => {
       const evt = JSON.parse(e.data)
       addEvent(evt)
+
+      if (evt.type === "start" && evt.data?.language_code) {
+        setClassifierLanguage(evt.data.language_code)
+        fetchClassifierStatus(evt.data.language_code)
+      }
 
       if (evt.type === "intro_start")  setIntroBloques(new Array(evt.data.total).fill(""))
       if (evt.type === "intro_ready") {
@@ -294,16 +301,17 @@ export default function GuionesModule() {
   }, [connectSSE]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Classifier status ─────────────────────────────────────────────────────
-  const fetchClassifierStatus = useCallback(() => {
+  const fetchClassifierStatus = useCallback((lang) => {
     const uid = userIdRef.current
     if (!uid) return
-    fetch(`${API}/classifier/status/${uid}`)
+    const language = lang || classifierLanguage || "es"
+    fetch(`${API}/classifier/status/${uid}?language_code=${language}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.segmentos) setClassifierStatus(data.segmentos) })
       .catch(() => {})
-  }, [])
+  }, [classifierLanguage])
 
-  // Fetch on mount so dropdown is populated immediately
+  // Fetch on mount and whenever the active classifier language changes
   useEffect(() => { fetchClassifierStatus() }, [fetchClassifierStatus])
 
   // ── Cancelar job en curso ─────────────────────────────────────────────────
@@ -436,6 +444,8 @@ export default function GuionesModule() {
           status={classifierStatus}
           autonomousMode={autonomousMode}
           onAutonomousChange={(seg, val) => setAutonomousMode(prev => ({ ...prev, [seg]: val }))}
+          classifierLanguage={classifierLanguage}
+          onLanguageChange={(lang) => { setClassifierLanguage(lang); fetchClassifierStatus(lang) }}
         />
 
         {tab === "editor" && (
