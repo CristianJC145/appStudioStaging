@@ -6,22 +6,6 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Gold scale */
-  --gold:   #9a7520;
-  --gold2:  #c9960f;
-  --gold3:  #d4a843;
-  --gold4:  #e8c96b;
-  --gold5:  #f5e6a8;
-  --gold6:  #fdf3d0;
-  /* Text */
-  --tx:     #f8f0dc;
-  --tx2:    rgba(236,216,154,0.65);
-  --tx3:    rgba(225,200,160,0.42);
-  --tx4:    rgba(200,180,130,0.28);
-  /* UI */
-  --green:  #2dbe60;
-  --bd:     rgba(212,168,67,0.18);
-  --bd-dim: rgba(212,168,67,0.10);
   /* Radii */
   --r:      14px;
   --r-sm:   8px;
@@ -41,6 +25,23 @@
 html { font-size: 16px; scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
 
 body.landing-body {
+  /* Gold scale — override App.css blue tokens */
+  --gold:   #9a7520;
+  --gold2:  #c9960f;
+  --gold3:  #d4a843;
+  --gold4:  #e8c96b;
+  --gold5:  #f5e6a8;
+  --gold6:  #fdf3d0;
+  /* Text */
+  --tx:     #f8f0dc;
+  --tx2:    rgba(236,216,154,0.65);
+  --tx3:    rgba(225,200,160,0.42);
+  --tx4:    rgba(200,180,130,0.28);
+  /* UI */
+  --green:  #2dbe60;
+  --bd:     rgba(212,168,67,0.18);
+  --bd-dim: rgba(212,168,67,0.10);
+  /* Base */
   font-family: var(--ff);
   background: #060502;
   color: var(--tx);
