@@ -1415,7 +1415,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border: 1px solid var(--bd-mid); border-radius: var(--r-lg);
   padding: 22px 26px; display: flex; align-items: center; gap: 20px;
   margin-bottom: 22px; position: relative; overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 20px rgba(180,130,15,0.06), inset 0 1px 0 rgba(74,184,212,0.10);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.55), 0 0 20px rgba(180,130,15,0.06), inset 0 1px 0 rgba(74,184,212,0.10) !important;
 }
 .download-banner::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
