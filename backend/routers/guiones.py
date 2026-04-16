@@ -277,17 +277,6 @@ class Config(BaseModel):
     pausa_intro_a_afirm: int = 2000
     pausa_afirm_a_medit: int = 3000
     pausa_entre_meditaciones: int = 5000
-    # SSML breaks por puntuación
-    usar_ssml_breaks: bool = False
-    break_coma: float = 0.5
-    break_punto: float = 0.7
-    break_suspensivos: float = 0.8
-    break_dos_puntos: float = 0.4
-    break_punto_coma: float = 0.6
-    break_guion: float = 0.5
-    break_exclamacion: float = 0.7
-    break_interrogacion: float = 0.7
-    break_parrafo: float = 1.0
     # Calentamiento de voz (warmup)
     usar_calentamiento: bool = True
     texto_calentamiento: str = ""  # vacío = auto-selección por language_code
@@ -390,68 +379,13 @@ def extender_silencios_internos(audio: "AudioSegment", cfg: Config) -> "AudioSeg
         resultado += audio[cursor:]
     return resultado
 
-def insertar_breaks_ssml(texto: str, cfg: Config) -> str:
-    if not cfg.usar_ssml_breaks:
-        return texto
-
-    def b(s): return f'<break time="{s}s"/>'
-
-    reglas = []
-    if cfg.break_suspensivos   > 0: reglas.append((r'\.\.\.|\u2026', cfg.break_suspensivos))
-    if cfg.break_guion         > 0: reglas.append((r'---|—',         cfg.break_guion))
-    if cfg.break_coma          > 0: reglas.append((r',',             cfg.break_coma))
-    if cfg.break_punto         > 0: reglas.append((r'\.(?!\d)',      cfg.break_punto))
-    if cfg.break_dos_puntos    > 0: reglas.append((r':(?!//)',       cfg.break_dos_puntos))
-    if cfg.break_punto_coma    > 0: reglas.append((r';',             cfg.break_punto_coma))
-    if cfg.break_exclamacion   > 0: reglas.append((r'!',             cfg.break_exclamacion))
-    if cfg.break_interrogacion > 0: reglas.append((r'\?',            cfg.break_interrogacion))
-
-    if reglas:
-        combined = '|'.join(f'({patron})' for patron, _ in reglas)
-        tiempos  = [t for _, t in reglas]
-        def _reemplazar(m):
-            for i, t in enumerate(tiempos):
-                if m.group(i + 1) is not None:
-                    return f'{m.group(i + 1)} {b(t)}'
-            return m.group(0)
-        t = re.sub(combined, _reemplazar, texto)
-    else:
-        t = texto
-
-    # Párrafos: si ya hay un break antes del \n\n, reemplazarlo por break_parrafo
-    # Solo reemplazar si el break existente es menor que break_parrafo; si es mayor, conservarlo.
-    if cfg.break_parrafo > 0:
-        brk = b(cfg.break_parrafo)
-        t = re.sub(
-            r' <break time="([\d.]+)s"/>([ \t]*\n[ \t]*\n)',
-            lambda m: (f' <break time="{m.group(1)}s"/>{m.group(2)}'
-                       if float(m.group(1)) >= cfg.break_parrafo
-                       else f' {brk}{m.group(2)}'),
-            t
-        )
-        t = re.sub(r'(?<!/>)([ \t]*\n[ \t]*\n)', f' {brk}\\1', t)
-
-    # Eliminar breaks sobrantes al final
-    t = re.sub(r'(\s*<break time="[\d.]+s"/>)+\s*$', '', t).strip()
-    return t
-
 
 def texto_a_audio_api(texto: str, ruta_salida: Path,
-                      voice_speed: float, cfg: Config,
-                      skip_punctuation_breaks: bool = False) -> bool:
+                      voice_speed: float, cfg: Config) -> bool:
     fmt = getattr(cfg, "output_format", "mp3_44100_128") or "mp3_44100_128"
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{cfg.voice_id}?output_format={fmt}"
     headers = {"xi-api-key": cfg.api_key, "Content-Type": "application/json"}
-    if skip_punctuation_breaks:
-        # Para intro/meditación: conservar breaks ya existentes en el texto (ej. calentamiento)
-        # pero no agregar nuevos por puntuación ni reemplazar comas.
-        texto_tts = texto.strip()
-    else:
-        texto_api = texto.replace(",", ", ---")
-        texto_tts = insertar_breaks_ssml(texto_api, cfg)
-        if not cfg.usar_ssml_breaks:
-            texto_tts = re.sub(r'<break\b[^>]*/>', '', texto_tts)
-        texto_tts = texto_tts.strip()
+    texto_tts = texto.strip()
     payload = {
         "text": texto_tts,
         "model_id": cfg.model_id,
@@ -532,8 +466,7 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
             tmp.close()
             tmp_path = Path(tmp.name)
             try:
-                ok = texto_a_audio_api(texto_api, tmp_path, voice_speed, cfg,
-                                       skip_punctuation_breaks=es_intro_medit)
+                ok = texto_a_audio_api(texto_api, tmp_path, voice_speed, cfg)
                 if not ok:
                     return None
                 audio_raw = _load_audio(tmp_path, fmt)
@@ -542,8 +475,7 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
             finally:
                 tmp_path.unlink(missing_ok=True)
         else:
-            ok = texto_a_audio_api(texto, ruta, voice_speed, cfg,
-                                   skip_punctuation_breaks=es_intro_medit)
+            ok = texto_a_audio_api(texto, ruta, voice_speed, cfg)
             if not ok:
                 return None
     audio = _load_audio(ruta, fmt)
