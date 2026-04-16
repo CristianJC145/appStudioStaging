@@ -161,7 +161,7 @@ export default function Canal() {
                 {[
                   { lbl: "Tasa de retención",     val: "68%",   color: "var(--gold4)" },
                   { lbl: "Tasa de likes",          val: "8.2%",  color: "var(--green)" },
-                  { lbl: "Comentarios / video",    val: "120+",  color: "var(--aurora)" },
+                  { lbl: "Comentarios / video",    val: "120+",  color: "var(--gold5)" },
                   { lbl: "Crecimiento mensual",    val: "+4.5%", color: "var(--gold5)" },
                   { lbl: "Visualizaciones / mes",  val: "80K+",  color: "var(--gold4)" },
                 ].map(m => (
