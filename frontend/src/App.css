@@ -2032,3 +2032,128 @@ input[type="range"]:hover::-webkit-slider-thumb {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.5s !important; transition-duration: 0.5s !important; }
 }
+
+
+/* ══════════════════════════════════════════
+   CLASIFICADOR IA — Componentes de UI
+══════════════════════════════════════════ */
+
+/* ── Barra de estado del clasificador ── */
+.clf-status-bar {
+  background: rgba(74,184,212,0.04);
+  border: 1px solid var(--bd-dim);
+  border-radius: var(--r-sm);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.clf-status-title {
+  margin-bottom: 10px;
+}
+.clf-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clf-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.clf-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.clf-seg-label {
+  font-size: 0.7rem;
+  color: var(--tx2);
+  width: 90px;
+  flex-shrink: 0;
+  font-family: var(--ff-mono);
+}
+.clf-umbral-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  min-width: 70px;
+}
+.clf-examples {
+  font-size: 0.65rem;
+  color: var(--tx3);
+  font-family: var(--ff-mono);
+  margin-left: auto;
+}
+.clf-progress-track {
+  height: 3px;
+  background: var(--bd-dim);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.clf-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+/* ── Toggle autónomo ── */
+.clf-auto-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border: 1px solid var(--bd-soft);
+  border-radius: var(--r-pill);
+  background: rgba(74,184,212,0.06);
+  transition: background var(--t), border-color var(--t);
+  user-select: none;
+}
+.clf-auto-toggle:hover {
+  background: rgba(74,184,212,0.12);
+  border-color: var(--bd-mid);
+}
+.clf-auto-toggle input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--aurora);
+  cursor: pointer;
+}
+.clf-auto-label {
+  font-size: 0.62rem;
+  color: var(--aurora);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── Badges de confianza en las cards ── */
+.clf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.04em;
+  margin-left: 8px;
+  cursor: default;
+  white-space: nowrap;
+}
+.clf-badge--ok {
+  background: rgba(45,190,96,0.12);
+  color: var(--green);
+  border: 1px solid rgba(45,190,96,0.25);
+}
+.clf-badge--warn {
+  background: rgba(240,192,64,0.12);
+  color: #f0c040;
+  border: 1px solid rgba(240,192,64,0.25);
+}
+.clf-badge--low {
+  background: rgba(232,72,60,0.10);
+  color: var(--red);
+  border: 1px solid rgba(232,72,60,0.22);
+}

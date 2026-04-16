@@ -21,7 +21,15 @@
       "Bash(sed -i -e 's/#060504/#030507/g' -e 's/#0c0a05/#060a0f/g' -e 's/#131008/#0a1018/g' -e 's/#1c1810/#0f1620/g' -e 's/rgba\\(10,8,2,0\\\\.92\\)/rgba\\(3,5,7,0.92\\)/g' 'd:/DOCUMENTOS USUARIO/Desktop/appStudio/frontend/src/App.css')",
       "Bash(sed -i -e 's/#f8f0dc/#e8f0f8/g' -e 's/rgba\\(236,216,154,0\\\\.55\\)/rgba\\(200,220,240,0.55\\)/g' -e 's/rgba\\(225,181,138,0\\\\.62\\)/rgba\\(180,200,220,0.55\\)/g' -e 's/rgba\\(197,166,86,0\\\\.20\\)/rgba\\(100,160,200,0.20\\)/g' 'd:/DOCUMENTOS USUARIO/Desktop/appStudio/frontend/src/App.css')",
       "Bash(sed -i 's/rgba\\(212,168,67,/rgba\\(74,184,212,/g' 'd:/DOCUMENTOS USUARIO/Desktop/appStudio/frontend/src/App.css')",
-      "Bash(sed -i -e 's/rgba\\(4,3,1,0\\\\.92\\)/rgba\\(3,5,7,0.92\\)/g' -e 's/rgba\\(4,3,1,0\\\\.96\\)/rgba\\(3,5,7,0.96\\)/g' 'd:/DOCUMENTOS USUARIO/Desktop/appStudio/frontend/src/App.css')"
+      "Bash(sed -i -e 's/rgba\\(4,3,1,0\\\\.92\\)/rgba\\(3,5,7,0.92\\)/g' -e 's/rgba\\(4,3,1,0\\\\.96\\)/rgba\\(3,5,7,0.96\\)/g' 'd:/DOCUMENTOS USUARIO/Desktop/appStudio/frontend/src/App.css')",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('routers/guiones.py'\\).read\\(\\)\\); print\\('guiones.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/storage.py'\\).read\\(\\)\\); print\\('storage.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/extractor.py'\\).read\\(\\)\\); print\\('extractor.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/classifier.py'\\).read\\(\\)\\); print\\('classifier.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/summarizer.py'\\).read\\(\\)\\); print\\('summarizer.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/regenerator.py'\\).read\\(\\)\\); print\\('regenerator.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routers/classifier_router.py'\\).read\\(\\)\\); print\\('classifier_router.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routers/guiones.py', encoding='utf-8'\\).read\\(\\)\\); print\\('guiones.py OK'\\)\")"
     ]
   }
 }

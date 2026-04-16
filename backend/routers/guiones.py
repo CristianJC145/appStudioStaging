@@ -23,6 +23,17 @@ import statistics
 import base64
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
+
+# ── Clasificador de audio (opcional — degrada si no está disponible) ──────────
+try:
+    from classifier.extractor  import cachear_features_async, get_cached_features
+    from classifier.classifier import clasificar_audio
+    from classifier.storage    import guardar_ejemplo, obtener_umbral
+    from classifier.summarizer import verificar_y_regenerar_resumen
+    CLASSIFIER_AVAILABLE = True
+except Exception as _clf_err:
+    CLASSIFIER_AVAILABLE = False
+    print(f"[guiones] Classifier not available: {_clf_err}")
 from pydantic import BaseModel
 
 try:
@@ -318,9 +329,10 @@ class Config(BaseModel):
     min_chars_parrafo: int = 220
 
 class GenerateRequest(BaseModel):
-    guion: str
-    config: Config
-    nombre: str = "meditacion"
+    guion:   str
+    config:  Config
+    nombre:  str = "meditacion"
+    user_id: Optional[int] = None   # for classifier training
 
 class ReviewDecision(BaseModel):
     job_id: str
@@ -597,6 +609,83 @@ def emit_event(job_id: str, event_type: str, data: dict):
     job_events[job_id].append({"type": event_type, "data": data})
     if job_id in jobs:
         jobs[job_id]["last_event"] = {"type": event_type, "data": data}
+
+
+# ── Classifier integration helpers ────────────────────────────────────────────
+
+_SEG_MAP_CLS = {"intro": "intro", "afirm": "afirmaciones", "medit": "meditacion"}
+_DEC_MAP_CLS = {
+    "ok": "aprobado", "aprobado": "aprobado",
+    "regenerate": "rechazado", "rechazado": "rechazado",
+    "skip": "rechazado",
+}
+
+
+def _clasificar_en_bg(
+    job_id: str, section: str, index: int,
+    ruta_preview: str, texto: str, params_elevenlabs: dict,
+):
+    """
+    Spawn a background thread that:
+    1. Extracts audio features from the preview WAV.
+    2. Runs the classifier (if user has enough examples).
+    3. Emits a `*_classified` SSE event with the result.
+    """
+    if not CLASSIFIER_AVAILABLE:
+        return
+
+    def _task():
+        user_id  = jobs.get(job_id, {}).get("user_id")
+        segmento = _SEG_MAP_CLS.get(section, section)
+
+        def _on_features(features):
+            if not user_id:
+                return
+            umbral = obtener_umbral(user_id, segmento)
+            if umbral == "sin_datos":
+                return
+            resultado = clasificar_audio(user_id, segmento, features, texto)
+            if resultado.get("decision") is not None:
+                emit_event(job_id, f"{section}_classified", {
+                    "index":     index,
+                    "section":   section,
+                    "confianza": resultado.get("confianza"),
+                    "decision":  resultado.get("decision"),
+                    "razon":     resultado.get("razon"),
+                    "modo":      resultado.get("modo"),
+                })
+
+        cachear_features_async(
+            job_id, section, index, ruta_preview,
+            texto, params_elevenlabs, _on_features,
+        )
+
+    threading.Thread(target=_task, daemon=True).start()
+
+
+def _guardar_decision_clasificador(
+    job_id: str, user_id: int, section: str, index: int, decision_str: str,
+):
+    """
+    Save a user's review decision as a classifier training example.
+    Runs in a FastAPI BackgroundTask — never blocks the HTTP response.
+    """
+    if not CLASSIFIER_AVAILABLE or not user_id:
+        return
+    try:
+        segmento = _SEG_MAP_CLS.get(section, section)
+        decision = _DEC_MAP_CLS.get(decision_str, "rechazado")
+        features = get_cached_features(job_id, section, index)
+        if not features:
+            return
+        guardar_ejemplo(
+            user_id, segmento, features, decision,
+            intento=1,
+            params_elevenlabs=features.get("params_elevenlabs") or {},
+        )
+        verificar_y_regenerar_resumen(user_id, segmento)
+    except Exception as exc:
+        print(f"[guiones] _guardar_decision_clasificador error: {exc}")
 
 def _construir_bloques(texto: str, cfg: Config,
                        warmup_overhead: int = 0) -> list[str]:
@@ -1174,6 +1263,9 @@ def _esperar_revision(job_id: str, section: str, items: list[str],
                         "audio_url": audio_url,
                         "message": f"Segmento {i + 1} regenerado"
                     })
+                    _clasificar_en_bg(job_id, section, i,
+                        str(CARPETA_TEMP / f"preview_{job_id}_{section}_{i}.wav"),
+                        items[i], {})
 
 # =============================================================
 #  JOB DE GENERACIÓN
@@ -1232,6 +1324,12 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                         "text": bloque, "audio_url": audio_url,
                         "message": f"Segmento de intro {i + 1} listo"
                     })
+                    _clasificar_en_bg(job_id, "intro", i,
+                        str(CARPETA_TEMP / f"preview_{job_id}_intro_{i}.wav"),
+                        bloque,
+                        {"speed": cfg.intro_voice_speed,
+                         "stability": cfg.voice_settings.stability,
+                         "similarity_boost": cfg.voice_settings.similarity_boost})
 
             emit_event(job_id, "intro_review_start", {
                 "message": "Intro generada. Esperando revisión...",
@@ -1306,6 +1404,12 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                             "text": linea, "audio_url": audio_url,
                             "message": f"Afirmación {flat_idx + 1} lista"
                         })
+                        _clasificar_en_bg(job_id, "afirm", flat_idx,
+                            str(CARPETA_TEMP / f"preview_{job_id}_afirm_{flat_idx}.wav"),
+                            linea,
+                            {"speed": cfg.afirm_voice_speed,
+                             "stability": cfg.voice_settings.stability,
+                             "similarity_boost": cfg.voice_settings.similarity_boost})
                     flat_idx += 1
 
             emit_event(job_id, "afirm_review_start", {
@@ -1349,6 +1453,12 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                             "text": texto_afirm, "audio_url": audio_url,
                             "message": f"Afirmación {flat_i + 1} regenerada"
                         })
+                        _clasificar_en_bg(job_id, "afirm", flat_i,
+                            str(CARPETA_TEMP / f"preview_{job_id}_afirm_{flat_i}.wav"),
+                            texto_afirm,
+                            {"speed": cfg.afirm_voice_speed,
+                             "stability": cfg.voice_settings.stability,
+                             "similarity_boost": cfg.voice_settings.similarity_boost})
 
             emit_event(job_id, "afirm_review_done", {"message": "Revisión de afirmaciones completada"})
 
@@ -1378,6 +1488,12 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                         "text": bloque, "audio_url": audio_url,
                         "message": f"Segmento de meditación {i + 1} listo"
                     })
+                    _clasificar_en_bg(job_id, "medit", i,
+                        str(CARPETA_TEMP / f"preview_{job_id}_medit_{i}.wav"),
+                        bloque,
+                        {"speed": cfg.medit_voice_speed,
+                         "stability": cfg.voice_settings.stability,
+                         "similarity_boost": cfg.voice_settings.similarity_boost})
 
             emit_event(job_id, "medit_review_start", {
                 "message": "Meditación generada. Esperando revisión...",
@@ -1495,6 +1611,7 @@ def start_generation(req: GenerateRequest, background_tasks: BackgroundTasks):
     jobs[job_id] = {
         "id": job_id, "status": "queued",
         "nombre": req.nombre, "config": req.config.model_dump(),
+        "user_id": req.user_id,
         "created_at": time.time(),
     }
     job_events[job_id] = []
@@ -1544,7 +1661,7 @@ def get_preview(job_id: str, section: str, index: int):
 
 
 @router.post("/review")
-def submit_review(decision: ReviewDecision):
+def submit_review(decision: ReviewDecision, background_tasks: BackgroundTasks):
     job_id  = decision.job_id
     section = decision.section
     index   = decision.index
@@ -1566,6 +1683,14 @@ def submit_review(decision: ReviewDecision):
     lock_key = f"{job_id}_{section}"
     if lock_key in job_locks:
         job_locks[lock_key].set()
+
+    # Save training example for the classifier (background — never blocks response)
+    user_id = jobs[job_id].get("user_id")
+    if user_id:
+        background_tasks.add_task(
+            _guardar_decision_clasificador,
+            job_id, user_id, section, index, decision.decision,
+        )
 
     return {"ok": True}
 

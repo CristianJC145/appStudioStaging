@@ -19,6 +19,12 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
 
+try:
+    from routers import classifier_router as _classifier_router
+    _CLASSIFIER_ROUTER = _classifier_router.router
+except Exception:
+    _CLASSIFIER_ROUTER = None
+
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
@@ -43,6 +49,8 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(bucles.router)
 app.include_router(generador.router)
+if _CLASSIFIER_ROUTER:
+    app.include_router(_CLASSIFIER_ROUTER)
 
 # ── Health global ─────────────────────────────────────────────
 @app.get("/api/health")

@@ -136,9 +136,22 @@ export default function GuionesModule() {
   const [charsUsados, setCharsUsados]     = useState(null)
   const [charsRestantes, setCharsRestantes] = useState(null)
   const [generating, setGenerating]       = useState(false)
-  const esRef        = useRef(null)
-  const saveTimerRef = useRef(null)
-  const userIdRef    = useRef(getUserId())
+
+  // ── Classifier state ───────────────────────────────────────────────────────
+  // classifierEvents: { "intro_0": {confianza, decision, razon, modo}, ... }
+  const [classifierEvents,  setClassifierEvents]  = useState({})
+  // classifierStatus: { intro: {ejemplos, umbral, siguiente_umbral}, afirmaciones: {}, meditacion: {} }
+  const [classifierStatus,  setClassifierStatus]  = useState(null)
+  // autonomousMode: { intro: bool, afirmaciones: bool, meditacion: bool }
+  const [autonomousMode,    setAutonomousMode]     = useState({ intro: false, afirmaciones: false, meditacion: false })
+
+  const esRef              = useRef(null)
+  const saveTimerRef       = useRef(null)
+  const userIdRef          = useRef(getUserId())
+  const autonomousModeRef  = useRef(autonomousMode)
+  const jobIdRef           = useRef(null)
+  useEffect(() => { autonomousModeRef.current = autonomousMode }, [autonomousMode])
+  useEffect(() => { jobIdRef.current = jobId }, [jobId])
 
   const addEvent = useCallback((evt) => {
     setEvents(prev => [...prev, { ...evt, ts: Date.now() }])
@@ -199,6 +212,37 @@ export default function GuionesModule() {
       if (evt.type === "medit_review_start") { setReviewSection("medit"); setJobStatus("awaiting_review"); setTab("review") }
       if (evt.type === "medit_review_done")  setReviewSection(null)
 
+      // ── Classifier events ─────────────────────────────────────────────────
+      if (evt.type === "intro_classified" || evt.type === "afirm_classified" || evt.type === "medit_classified") {
+        const key = `${evt.data.section}_${evt.data.index}`
+        setClassifierEvents(prev => ({ ...prev, [key]: evt.data }))
+        // Autonomous mode: auto-approve high-confidence approved audios
+        const segMap = { intro: "intro", afirm: "afirmaciones", medit: "meditacion" }
+        const seg = segMap[evt.data.section]
+        if (
+          autonomousModeRef.current[seg] &&
+          evt.data.decision === "aprobado" &&
+          (evt.data.confianza ?? 0) >= 85
+        ) {
+          // Auto-approve: use ref-based jobId to avoid stale closure
+          const jid = jobIdRef.current
+          if (jid) {
+            const sec = evt.data.section, idx = evt.data.index
+            const decKey = `${sec}_decisions`
+            // Update local state
+            if (sec === "intro")  setIntroDecisions(prev => ({ ...prev, [idx]: "ok" }))
+            else if (sec === "afirm") setAfirmDecisions(prev => ({ ...prev, [idx]: "ok" }))
+            else setMeditDecisions(prev => ({ ...prev, [idx]: "ok" }))
+            // Send to backend
+            fetch(`${API}/api/review`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ job_id: jid, section: sec, index: idx, decision: "ok", new_text: null }),
+            }).catch(() => {})
+          }
+        }
+      }
+
       if (evt.type === "building") { setJobStatus("building"); setTab("progress") }
       if (evt.type === "done") {
         setDownloadUrl(`${API}${evt.data.download_url}`)
@@ -247,6 +291,16 @@ export default function GuionesModule() {
       .catch(() => clearJobId(userId))
   }, [connectSSE]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Classifier status ─────────────────────────────────────────────────────
+  const fetchClassifierStatus = useCallback(() => {
+    const uid = userIdRef.current
+    if (!uid) return
+    fetch(`${API}/classifier/status/${uid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.segmentos) setClassifierStatus(data.segmentos) })
+      .catch(() => {})
+  }, [])
+
   // ── Cancelar job en curso ─────────────────────────────────────────────────
   const cancelJob = useCallback(() => {
     if (esRef.current) { esRef.current.close(); esRef.current = null }
@@ -259,6 +313,7 @@ export default function GuionesModule() {
     setAfirmaciones([]); setAfirmAudios({}); setAfirmDecisions({}); setAfirmRegenerating(new Set())
     setMeditaciones([]); setMeditAudios({}); setMeditDecisions({}); setMeditRegenerating(new Set())
     setDownloadUrl(null); setDurationMins(null)
+    setClassifierEvents({})
     setEvents([])
     setTab("editor")
   }, [])
@@ -275,13 +330,14 @@ export default function GuionesModule() {
     setReviewSection(null)
     setDownloadUrl(null)
     setDurationMins(null)
+    setClassifierEvents({})
     setJobStatus("starting")
 
     try {
       const res = await fetch(`${API}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guion, config, nombre }),
+        body: JSON.stringify({ guion, config, nombre, user_id: userIdRef.current ? parseInt(userIdRef.current) : null }),
       })
       const data = await res.json()
       const id   = data.job_id
@@ -351,7 +407,7 @@ export default function GuionesModule() {
             <button
               key={id}
               className={`nav-btn ${tab === id ? "active" : ""}`}
-              onClick={() => setTab(id)}
+              onClick={() => { setTab(id); if (id === "review") fetchClassifierStatus() }}
             >
               {label}
               {badge && <span className="nav-badge">{badge}</span>}
@@ -405,6 +461,10 @@ export default function GuionesModule() {
             introRegenerating={introRegenerating}
             afirmRegenerating={afirmRegenerating}
             meditRegenerating={meditRegenerating}
+            classifierEvents={classifierEvents}
+            classifierStatus={classifierStatus}
+            autonomousMode={autonomousMode}
+            onAutonomousChange={(seg, val) => setAutonomousMode(prev => ({ ...prev, [seg]: val }))}
             onDecision={submitDecision}
             onFinalize={finalizeSection}
             jobStatus={jobStatus}
