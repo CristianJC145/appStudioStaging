@@ -34,7 +34,8 @@
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark SaaS dashboard floating action button panel professional\" --design-system -p \"AppStudio Classifier FAB\")",
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"floating button FAB overlay panel animation dark\" --domain ux)",
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"z-index overlay tooltip popover panel\" --domain ux)",
-      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphism panel card\" --domain style)"
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphism panel card\" --domain style)",
+      "Bash(python -c ' *)"
     ]
   }
 }
