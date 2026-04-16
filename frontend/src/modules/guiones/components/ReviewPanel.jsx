@@ -1,88 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 
 // ─────────────────────────────────────────────────────────────
-//  Classifier: barra de progreso de aprendizaje por segmento
-// ─────────────────────────────────────────────────────────────
-const UMBRAL_LABELS = {
-  sin_datos: "Aprendiendo",
-  aceptable: "Copiloto",
-  bueno:     "Semi-auto",
-  excelente: "Autónomo",
-  pro:       "Pro",
-}
-const UMBRAL_COLORS = {
-  sin_datos: "var(--tx3)",
-  aceptable: "var(--aurora)",
-  bueno:     "#f0c040",
-  excelente: "var(--green)",
-  pro:       "var(--gold3)",
-}
-const UMBRAL_ORDER = ["sin_datos", "aceptable", "bueno", "excelente", "pro"]
-
-function ClassifierProgressBar({ segmentos, autonomousMode, onAutonomousChange }) {
-  if (!segmentos) return null
-
-  const entries = [
-    { key: "intro",        label: "Intro" },
-    { key: "afirmaciones", label: "Afirmaciones" },
-    { key: "meditacion",   label: "Meditación" },
-  ]
-
-  return (
-    <div className="clf-status-bar">
-      <div className="clf-status-title">
-        <span style={{ fontSize: "0.65rem", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--tx3)" }}>
-          ◈ Clasificador IA
-        </span>
-      </div>
-      <div className="clf-rows">
-        {entries.map(({ key, label }) => {
-          const info     = segmentos[key]
-          if (!info) return null
-          const n        = info.ejemplos        ?? 0
-          const umbral   = info.umbral          ?? "sin_datos"
-          const sig      = info.siguiente_umbral ?? {}
-          const pct      = sig.total ? Math.min(100, (n / sig.total) * 100) : (umbral === "pro" ? 100 : 0)
-          const color    = UMBRAL_COLORS[umbral] ?? "var(--aurora)"
-          const canAuto  = umbral === "excelente" || umbral === "pro"
-          const isAuto   = autonomousMode?.[key] ?? false
-
-          return (
-            <div key={key} className="clf-row">
-              <div className="clf-row-head">
-                <span className="clf-seg-label">{label}</span>
-                <span className="clf-umbral-badge" style={{ color }}>
-                  {UMBRAL_LABELS[umbral] ?? umbral}
-                </span>
-                <span className="clf-examples">
-                  {n} {sig.total ? `/ ${sig.total}` : ""} ejemplos
-                </span>
-                {canAuto && (
-                  <label className="clf-auto-toggle" title="Modo autónomo: aprueba automáticamente audios con confianza ≥ 85%">
-                    <input
-                      type="checkbox"
-                      checked={isAuto}
-                      onChange={e => onAutonomousChange?.(key, e.target.checked)}
-                    />
-                    <span className="clf-auto-label">Auto</span>
-                  </label>
-                )}
-              </div>
-              <div className="clf-progress-track">
-                <div
-                  className="clf-progress-fill"
-                  style={{ width: `${pct}%`, background: color }}
-                />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────
 //  Badge de confianza del clasificador
 // ─────────────────────────────────────────────────────────────
 function ConfidenceBadge({ data }) {
@@ -579,7 +497,7 @@ export default function ReviewPanel({
   afirmaciones, afirmAudios, afirmDecisions,
   meditaciones, meditAudios, meditDecisions,
   introRegenerating, afirmRegenerating, meditRegenerating,
-  classifierEvents, classifierStatus, autonomousMode, onAutonomousChange,
+  classifierEvents,
   onDecision, onFinalize, jobStatus
 }) {
   const hasIntro = introBloques.length > 0
@@ -600,13 +518,6 @@ export default function ReviewPanel({
 
   return (
     <div className="fade-up">
-
-      {/* Clasificador IA: barra de progreso de aprendizaje */}
-      <ClassifierProgressBar
-        segmentos={classifierStatus}
-        autonomousMode={autonomousMode}
-        onAutonomousChange={onAutonomousChange}
-      />
 
       {/* Indicador de sección activa */}
       {reviewSection && (

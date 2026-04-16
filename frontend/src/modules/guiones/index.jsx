@@ -4,6 +4,7 @@ import ScriptEditor from "./components/ScriptEditor"
 import GenerationProgress from "./components/GenerationProgress"
 import ReviewPanel from "./components/ReviewPanel"
 import HistoryPanel from "./components/HistoryPanel"
+import ClassifierDropdown from "./components/ClassifierDropdown"
 
 const DEFAULT_CONFIG = {
   api_key: "dd15fc77bf3a163f41e678cf29f8018fc0c43e756081a6e4dcbd6bc66ae5e251",
@@ -253,6 +254,7 @@ export default function GuionesModule() {
         setGenerating(false)
         setTab("progress")
         clearJobId(userIdRef.current)
+        fetchClassifierStatus()
         es.close()
       }
       if (evt.type === "error") {
@@ -263,7 +265,7 @@ export default function GuionesModule() {
       }
     }
     es.onerror = () => { es.close(); setGenerating(false) }
-  }, [addEvent])
+  }, [addEvent]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Restaurar job al recargar página ──────────────────────────────────────
   useEffect(() => {
@@ -300,6 +302,9 @@ export default function GuionesModule() {
       .then(data => { if (data?.segmentos) setClassifierStatus(data.segmentos) })
       .catch(() => {})
   }, [])
+
+  // Fetch on mount so dropdown is populated immediately
+  useEffect(() => { fetchClassifierStatus() }, [fetchClassifierStatus])
 
   // ── Cancelar job en curso ─────────────────────────────────────────────────
   const cancelJob = useCallback(() => {
@@ -407,7 +412,7 @@ export default function GuionesModule() {
             <button
               key={id}
               className={`nav-btn ${tab === id ? "active" : ""}`}
-              onClick={() => { setTab(id); if (id === "review") fetchClassifierStatus() }}
+              onClick={() => setTab(id)}
             >
               {label}
               {badge && <span className="nav-badge">{badge}</span>}
@@ -426,6 +431,13 @@ export default function GuionesModule() {
       </nav>
 
       <div className="module-content">
+        {/* ── Classifier learning progress — always visible ── */}
+        <ClassifierDropdown
+          status={classifierStatus}
+          autonomousMode={autonomousMode}
+          onAutonomousChange={(seg, val) => setAutonomousMode(prev => ({ ...prev, [seg]: val }))}
+        />
+
         {tab === "editor" && (
           <div className="editor-layout">
             <ScriptEditor
@@ -462,9 +474,6 @@ export default function GuionesModule() {
             afirmRegenerating={afirmRegenerating}
             meditRegenerating={meditRegenerating}
             classifierEvents={classifierEvents}
-            classifierStatus={classifierStatus}
-            autonomousMode={autonomousMode}
-            onAutonomousChange={(seg, val) => setAutonomousMode(prev => ({ ...prev, [seg]: val }))}
             onDecision={submitDecision}
             onFinalize={finalizeSection}
             jobStatus={jobStatus}
