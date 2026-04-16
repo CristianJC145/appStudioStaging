@@ -2035,164 +2035,256 @@ input[type="range"]:hover::-webkit-slider-thumb {
 
 
 /* ══════════════════════════════════════════
-   CLASIFICADOR IA — Componentes de UI
+   CLASIFICADOR IA — FAB flotante + badges
 ══════════════════════════════════════════ */
 
-/* ── Dropdown container ── */
-.clf-dropdown {
-  margin-bottom: 16px;
+/* ── Root container (renderizado en <body> via portal) ── */
+.clf-fab-root {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;    /* sólo los hijos activan eventos */
 }
 
-/* ── Trigger button ── */
-.clf-trigger {
-  width: 100%;
+/* ── Botón circular FAB ── */
+.clf-fab {
+  pointer-events: all;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(5, 9, 14, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(74, 184, 212, 0.22);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+  transition:
+    transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+.clf-fab:hover {
+  transform: scale(1.1);
+  border-color: rgba(74, 184, 212, 0.45);
+  box-shadow:
+    0 6px 30px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(74, 184, 212, 0.18);
+}
+.clf-fab:active {
+  transform: scale(0.92);
+  transition-duration: 0.1s;
+}
+.clf-fab--active {
+  border-color: rgba(74, 184, 212, 0.5);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.45),
+    0 0 24px rgba(74, 184, 212, 0.22);
+}
+.clf-fab:focus-visible {
+  outline: 2px solid rgba(74, 184, 212, 0.55);
+  outline-offset: 3px;
+}
+
+/* Punto de estado (esquina superior derecha del FAB) */
+.clf-fab-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(5, 9, 14, 0.92);
+  pointer-events: none;
+}
+
+/* ── Panel flotante glassmorphic ── */
+.clf-fab-panel {
+  pointer-events: none;
+  width: 272px;
+  background: rgba(4, 8, 13, 0.97);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(74, 184, 212, 0.18);
+  border-radius: 14px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.65),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(74, 184, 212, 0.06);
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+  transition:
+    opacity 0.22s ease,
+    transform 0.26s cubic-bezier(0.34, 1.3, 0.64, 1),
+    visibility 0s linear 0.22s;
+  visibility: hidden;
+  overflow: hidden;
+}
+.clf-fab-panel--open {
+  pointer-events: all;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  transition:
+    opacity 0.22s ease,
+    transform 0.26s cubic-bezier(0.34, 1.3, 0.64, 1),
+    visibility 0s linear 0s;
+}
+
+/* ── Cabecera del panel ── */
+.clf-fab-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--bd-dim);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background var(--t), border-color var(--t), border-radius var(--t);
-  text-align: left;
+  padding: 13px 14px 11px;
+}
+.clf-fab-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(74, 184, 212, 0.09);
+  border: 1px solid rgba(74, 184, 212, 0.14);
+  flex-shrink: 0;
+}
+.clf-fab-header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.clf-fab-header-title {
+  font-size: 0.73rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   color: var(--tx);
   font-family: var(--ff-body);
-  font-size: 0.78rem;
-}
-.clf-trigger:hover {
-  background: rgba(74,184,212,0.05);
-  border-color: var(--bd-soft);
-}
-.clf-trigger--open {
-  background: rgba(74,184,212,0.06);
-  border-color: var(--bd-soft);
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
-}
-.clf-trigger-icon {
-  font-size: 0.78rem;
-  flex-shrink: 0;
   line-height: 1;
 }
-.clf-trigger-title {
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--tx2);
+.clf-fab-header-sub {
+  font-size: 0.59rem;
+  color: var(--tx3);
+  font-family: var(--ff-mono);
+  letter-spacing: 0.03em;
+  line-height: 1;
+}
+.clf-fab-header-badge {
+  font-size: 0.59rem;
+  font-family: var(--ff-mono);
+  color: rgba(74, 184, 212, 0.7);
+  background: rgba(74, 184, 212, 0.07);
+  border: 1px solid rgba(74, 184, 212, 0.12);
+  border-radius: 20px;
+  padding: 2px 9px;
   flex-shrink: 0;
   white-space: nowrap;
 }
-.clf-trigger-pills {
-  display: flex;
-  gap: 14px;
-  flex: 1;
-  flex-wrap: wrap;
-  padding-left: 4px;
-}
-.clf-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.63rem;
-  font-family: var(--ff-mono);
-}
-.clf-pill-seg {
-  color: var(--tx3);
-}
-.clf-pill-val {
-  font-weight: 600;
-}
-.clf-trigger-total {
-  font-size: 0.61rem;
-  font-family: var(--ff-mono);
-  color: var(--tx3);
-  flex-shrink: 0;
-  margin-left: auto;
-}
-.clf-trigger-chevron {
-  font-size: 0.55rem;
-  color: var(--tx3);
-  flex-shrink: 0;
-  margin-left: 4px;
+
+/* Divisor */
+.clf-fab-divider {
+  height: 1px;
+  background: rgba(74, 184, 212, 0.07);
+  margin: 0;
 }
 
-/* ── Collapsible panel ── */
-.clf-panel {
-  overflow: hidden;
-  max-height: 0;
-  transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.clf-panel--open {
-  max-height: 260px;
-}
-.clf-panel-inner {
+/* ── Filas de segmentos ── */
+.clf-fab-segs {
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  padding: 14px 16px 12px;
-  background: var(--surface-1);
-  border: 1px solid var(--bd-soft);
-  border-top: none;
-  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  padding: 8px 14px 6px;
 }
-
-/* ── Segment rows inside panel ── */
-.clf-seg-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+.clf-fab-seg {
+  padding: 7px 0 6px;
+  border-bottom: 1px solid rgba(74, 184, 212, 0.05);
 }
-.clf-seg-row-head {
+.clf-fab-seg:last-child {
+  border-bottom: none;
+}
+.clf-fab-seg-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
-.clf-seg-name {
-  font-size: 0.68rem;
-  font-family: var(--ff-mono);
+.clf-fab-seg-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clf-fab-seg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.clf-fab-seg-name {
+  font-size: 0.66rem;
   color: var(--tx2);
-  width: 96px;
-  flex-shrink: 0;
+  font-family: var(--ff-mono);
+  min-width: 82px;
 }
-.clf-seg-badge {
-  font-size: 0.61rem;
+.clf-fab-seg-level {
+  font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  min-width: 76px;
+  line-height: 1;
 }
-.clf-seg-bar-wrap {
-  flex: 1;
-  min-width: 60px;
+.clf-fab-seg-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
-.clf-seg-bar {
-  height: 3px;
-  background: var(--bd-dim);
+.clf-fab-seg-count {
+  font-size: 0.59rem;
+  font-family: var(--ff-mono);
+  color: var(--tx3);
+}
+
+/* Barra de progreso del segmento */
+.clf-fab-seg-track {
+  height: 2.5px;
+  background: rgba(74, 184, 212, 0.09);
   border-radius: 2px;
   overflow: hidden;
 }
-.clf-seg-bar-fill {
+.clf-fab-seg-fill {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.6s ease;
+  transition: width 0.7s ease;
 }
-.clf-seg-count {
-  font-size: 0.61rem;
+
+/* ── Pie del panel ── */
+.clf-fab-footer {
+  padding: 8px 14px 12px;
+  font-size: 0.57rem;
+  color: rgba(74, 184, 212, 0.25);
+  line-height: 1.55;
   font-family: var(--ff-mono);
-  color: var(--tx3);
-  flex-shrink: 0;
-  min-width: 68px;
-  text-align: right;
+  text-align: center;
+  border-top: 1px solid rgba(74, 184, 212, 0.05);
 }
-.clf-panel-hint {
-  font-size: 0.6rem;
-  color: var(--tx3);
-  line-height: 1.5;
-  border-top: 1px solid var(--bd-dim);
-  padding-top: 8px;
-  margin-top: 2px;
+
+/* ── Respeta prefers-reduced-motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .clf-fab,
+  .clf-fab-panel {
+    transition: none;
+  }
 }
 
 /* ── Toggle autónomo ── */

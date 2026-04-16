@@ -431,7 +431,7 @@ export default function GuionesModule() {
       </nav>
 
       <div className="module-content">
-        {/* ── Classifier learning progress — always visible ── */}
+        {/* ── Classifier FAB — renders via portal to document.body ── */}
         <ClassifierDropdown
           status={classifierStatus}
           autonomousMode={autonomousMode}

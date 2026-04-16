@@ -29,7 +29,12 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/summarizer.py'\\).read\\(\\)\\); print\\('summarizer.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('classifier/regenerator.py'\\).read\\(\\)\\); print\\('regenerator.py OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('routers/classifier_router.py'\\).read\\(\\)\\); print\\('classifier_router.py OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('routers/guiones.py', encoding='utf-8'\\).read\\(\\)\\); print\\('guiones.py OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('routers/guiones.py', encoding='utf-8'\\).read\\(\\)\\); print\\('guiones.py OK'\\)\")",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"dark SaaS dashboard floating action button panel professional\" --design-system -p \"AppStudio Classifier FAB\")",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark SaaS dashboard floating action button panel professional\" --design-system -p \"AppStudio Classifier FAB\")",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"floating button FAB overlay panel animation dark\" --domain ux)",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"z-index overlay tooltip popover panel\" --domain ux)",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphism panel card\" --domain style)"
     ]
   }
 }
