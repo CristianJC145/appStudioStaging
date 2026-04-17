@@ -56,7 +56,7 @@ const TABS = [
   { id: "history",  label: "Historial" },
 ]
 
-const API = import.meta.env.VITE_API_URL
+const API = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "")
 
 // ── Persistencia de job por usuario ─────────────────────────────────────────
 function getUserId() {
@@ -236,7 +236,6 @@ export default function GuionesModule() {
           const jid = jobIdRef.current
           if (jid) {
             const sec = evt.data.section, idx = evt.data.index
-            const decKey = `${sec}_decisions`
             // Update local state
             if (sec === "intro")  setIntroDecisions(prev => ({ ...prev, [idx]: "ok" }))
             else if (sec === "afirm") setAfirmDecisions(prev => ({ ...prev, [idx]: "ok" }))
