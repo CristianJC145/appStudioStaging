@@ -13,10 +13,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 try:
-    from classifier.storage   import obtener_status_completo, obtener_resumen, obtener_umbral, guardar_ejemplo
+    from classifier.storage   import obtener_status_completo, obtener_resumen, obtener_umbral, guardar_ejemplo, borrar_segmento
     from classifier.classifier import clasificar_audio
     from classifier.extractor  import get_cached_features
-    from classifier.summarizer import verificar_y_regenerar_resumen
+    from classifier.summarizer import verificar_y_regenerar_resumen, limpiar_cache_segmento
     CLASSIFIER_AVAILABLE = True
 except ImportError as _e:
     CLASSIFIER_AVAILABLE = False
@@ -104,6 +104,29 @@ def register_feedback(body: FeedbackBody):
                 daemon=True,
             ).start()
         return {"ok": ok}
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+_VALID_SEGMENTOS = {"intro", "meditacion", "afirmaciones"}
+
+@router.delete("/reset/{user_id}/{segmento}")
+def reset_segmento(user_id: int, segmento: str, language_code: str = Query("es")):
+    """Delete all training data and summary for a user/segment/language."""
+    if not CLASSIFIER_AVAILABLE:
+        raise HTTPException(503, "Classifier not available")
+    if segmento not in _VALID_SEGMENTOS:
+        raise HTTPException(400, f"segmento must be one of {_VALID_SEGMENTOS}")
+    try:
+        result = borrar_segmento(user_id, segmento, language_code)
+        limpiar_cache_segmento(user_id, segmento, language_code)
+        return {
+            "ok": True,
+            "user_id": user_id,
+            "segmento": segmento,
+            "language_code": language_code,
+            "deleted": result,
+        }
     except Exception as exc:
         raise HTTPException(500, str(exc))
 

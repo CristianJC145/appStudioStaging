@@ -31,6 +31,13 @@ _last_summarized      : dict[str, int] = {}
 _last_summarized_lock = threading.Lock()
 
 
+def limpiar_cache_segmento(user_id: int, segmento: str, language_code: str = "es"):
+    """Remove in-memory summary counter for a reset segment."""
+    key = f"{user_id}_{segmento}_{language_code}"
+    with _last_summarized_lock:
+        _last_summarized.pop(key, None)
+
+
 def verificar_y_regenerar_resumen(user_id: int, segmento: str, language_code: str = "es"):
     """
     Check if a new summary is needed (every 20 new examples, min 30 total).

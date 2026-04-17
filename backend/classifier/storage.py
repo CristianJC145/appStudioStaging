@@ -362,5 +362,27 @@ def obtener_status_completo(user_id: int, language_code: str = "es") -> dict:
         return {}
 
 
+def borrar_segmento(user_id: int, segmento: str, language_code: str = "es") -> dict:
+    """Delete all training data and summary for a user/segment/language. Returns counts deleted."""
+    try:
+        conn = _get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM classifier_dataset WHERE user_id=%s AND segmento=%s AND language_code=%s",
+                (user_id, segmento, language_code),
+            )
+            deleted_ejemplos = cur.rowcount
+            cur.execute(
+                "DELETE FROM classifier_resumen WHERE user_id=%s AND segmento=%s AND language_code=%s",
+                (user_id, segmento, language_code),
+            )
+            deleted_resumen = cur.rowcount
+        conn.close()
+        return {"ejemplos": deleted_ejemplos, "resumen": deleted_resumen}
+    except Exception as e:
+        print(f"[classifier.storage] borrar_segmento error: {e}")
+        return {"ejemplos": 0, "resumen": 0}
+
+
 # Create tables on first import
 ensure_tables()
