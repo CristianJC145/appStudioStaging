@@ -56,7 +56,8 @@ const TABS = [
   { id: "history",  label: "Historial" },
 ]
 
-const API = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "")
+const API = import.meta.env.VITE_API_URL
+
 
 // ── Persistencia de job por usuario ─────────────────────────────────────────
 function getUserId() {
