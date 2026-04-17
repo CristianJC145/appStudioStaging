@@ -15,6 +15,7 @@ import GeneradorModule  from "./modules/generador"
 import AdminPanel from "./pages/AdminPanel"
 import modules from "./modules/registry"
 import logoImg from "./assets/logo.png"
+import { ConfirmProvider } from "./components/ConfirmModal"
 import "./App.css"
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000"
@@ -328,18 +329,20 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<StudioLanding />} />
-        <Route path="/portafolio" element={<Landing />}>
-          <Route index                    element={<LandingHome />}      />
-          <Route path="nosotros"          element={<LandingNosotros />}  />
-          <Route path="canal"             element={<LandingCanal />}     />
-          <Route path="contenido"         element={<LandingContenido />} />
-          <Route path="comunidad"         element={<LandingComunidad />} />
-        </Route>
-        <Route path="/login" element={<Login />} />
-        <Route path="/studio/*" element={<RequireAuth><Shell /></RequireAuth>} />
-      </Routes>
+      <ConfirmProvider>
+        <Routes>
+          <Route path="/" element={<StudioLanding />} />
+          <Route path="/portafolio" element={<Landing />}>
+            <Route index                    element={<LandingHome />}      />
+            <Route path="nosotros"          element={<LandingNosotros />}  />
+            <Route path="canal"             element={<LandingCanal />}     />
+            <Route path="contenido"         element={<LandingContenido />} />
+            <Route path="comunidad"         element={<LandingComunidad />} />
+          </Route>
+          <Route path="/login" element={<Login />} />
+          <Route path="/studio/*" element={<RequireAuth><Shell /></RequireAuth>} />
+        </Routes>
+      </ConfirmProvider>
     </BrowserRouter>
   )
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import { useConfirm } from "../../../components/ConfirmModal"
 
 // ─── Design tokens ────────────────────────────────────────────
 const UMBRAL_META = {
@@ -99,6 +100,7 @@ export default function ClassifierDropdown({
   onLanguageChange,
   onResetSegment,
 }) {
+  const confirm                 = useConfirm()
   const [open, setOpen]         = useState(false)
   const [showInfo, setShowInfo] = useState(false)
   const panelRef                = useRef(null)
@@ -132,9 +134,14 @@ export default function ClassifierDropdown({
     : 0
   const anyAutoActive = autonomousMode && Object.values(autonomousMode).some(Boolean)
 
-  const handleReset = (key, label) => {
-    if (!window.confirm(`¿Limpiar el aprendizaje de "${label}"? Esta acción no se puede deshacer.`)) return
-    onResetSegment?.(key)
+  const handleReset = async (key, label) => {
+    const ok = await confirm({
+      title:        `Resetear aprendizaje — ${label}`,
+      description:  `Se eliminarán todos los ejemplos de entrenamiento y el resumen generado para el segmento "${label}". Esta acción no se puede deshacer.`,
+      variant:      "danger",
+      confirmLabel: "Sí, resetear",
+    })
+    if (ok) onResetSegment?.(key)
   }
 
   return createPortal(
