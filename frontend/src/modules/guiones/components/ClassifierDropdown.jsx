@@ -218,52 +218,65 @@ export default function ClassifierDropdown({
 
             return (
               <div key={key} className="clf-fab-seg">
+
+                {/* ── Fila 1: nombre · nivel · conteo ── */}
                 <div className="clf-fab-seg-row">
-                  {/* Left: dot + name + level */}
                   <div className="clf-fab-seg-left">
                     <span className="clf-fab-seg-dot" style={{ background: meta.color }} />
                     <span className="clf-fab-seg-name">{label}</span>
-                    <span className="clf-fab-seg-level" style={{ color: meta.color }}>
+                  </div>
+                  <div className="clf-fab-seg-right">
+                    <span
+                      className="clf-fab-seg-level"
+                      style={{
+                        color: meta.color,
+                        borderColor: meta.color + "30",
+                        background:  meta.color + "12",
+                      }}
+                    >
                       {meta.label}
                     </span>
-                  </div>
-
-                  {/* Right: count + reset + auto toggle */}
-                  <div className="clf-fab-seg-right">
                     <span className="clf-fab-seg-count">
                       {n}{sig.total ? `/${sig.total}` : ""}
                     </span>
-                    <button
-                      className="clf-reset-btn"
-                      onClick={() => handleReset(key, label)}
-                      title={`Limpiar aprendizaje de ${label}`}
-                      aria-label={`Resetear ${label}`}
-                    >
-                      <ResetIcon size={10} />
-                    </button>
-                    {canAuto && (
-                      <button
-                        className={`clf-toggle ${isAuto ? "clf-toggle--on" : ""}`}
-                        onClick={() => onAutonomousChange?.(key, !isAuto)}
-                        title="Auto-aprobar audios con confianza ≥ 85%"
-                        aria-pressed={isAuto}
-                      >
-                        <span className="clf-toggle-track">
-                          <span className="clf-toggle-knob" />
-                        </span>
-                        <span className="clf-auto-label">Auto</span>
-                      </button>
-                    )}
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* ── Barra de progreso ── */}
                 <div className="clf-fab-seg-track">
                   <div
                     className="clf-fab-seg-fill"
                     style={{ width: `${pct}%`, background: meta.color }}
                   />
                 </div>
+
+                {/* ── Fila 2: acciones ── */}
+                <div className="clf-fab-seg-actions">
+                  <button
+                    className="clf-reset-btn"
+                    onClick={() => handleReset(key, label)}
+                    title={`Limpiar aprendizaje de ${label}`}
+                    aria-label={`Resetear ${label}`}
+                  >
+                    <ResetIcon size={9} />
+                    <span>Resetear</span>
+                  </button>
+
+                  {canAuto && (
+                    <button
+                      className={`clf-toggle ${isAuto ? "clf-toggle--on" : ""}`}
+                      onClick={() => onAutonomousChange?.(key, !isAuto)}
+                      title="Auto-aprobar audios con confianza ≥ 85%"
+                      aria-pressed={isAuto}
+                    >
+                      <span className="clf-auto-label">{isAuto ? "Auto on" : "Auto"}</span>
+                      <span className="clf-toggle-track">
+                        <span className="clf-toggle-knob" />
+                      </span>
+                    </button>
+                  )}
+                </div>
+
               </div>
             )
           })}

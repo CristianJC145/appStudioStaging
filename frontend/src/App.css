@@ -2112,7 +2112,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
 /* ── Panel flotante glassmorphic ── */
 .clf-fab-panel {
   pointer-events: none;
-  width: 295px;
+  width: 272px;
   background: rgba(4, 8, 13, 0.97);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
@@ -2231,29 +2231,42 @@ input[type="range"]:hover::-webkit-slider-thumb {
   margin: 0;
 }
 
-/* ── Filas de segmentos ── */
+/* ── Segmentos: contenedor ── */
 .clf-fab-segs {
   display: flex;
   flex-direction: column;
-  padding: 8px 14px 6px;
+  padding: 6px 14px 4px;
+  gap: 2px;
 }
+
+/* Card por segmento */
 .clf-fab-seg {
-  padding: 7px 0 6px;
-  border-bottom: 1px solid rgba(74, 184, 212, 0.05);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(74, 184, 212, 0.03);
+  border: 1px solid rgba(74, 184, 212, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  transition: background 0.18s ease, border-color 0.18s ease;
 }
-.clf-fab-seg:last-child {
-  border-bottom: none;
+.clf-fab-seg:hover {
+  background: rgba(74, 184, 212, 0.055);
+  border-color: rgba(74, 184, 212, 0.1);
 }
+
+/* ── Fila 1: nombre + nivel + conteo ── */
 .clf-fab-seg-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 6px;
 }
 .clf-fab-seg-left {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 .clf-fab-seg-dot {
   width: 6px;
@@ -2262,34 +2275,40 @@ input[type="range"]:hover::-webkit-slider-thumb {
   flex-shrink: 0;
 }
 .clf-fab-seg-name {
-  font-size: 0.66rem;
+  font-size: 0.67rem;
+  font-weight: 500;
   color: var(--tx2);
   font-family: var(--ff-mono);
-  min-width: 70px;
-}
-.clf-fab-seg-level {
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  line-height: 1;
+  white-space: nowrap;
 }
 .clf-fab-seg-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
+.clf-fab-seg-level {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 20px;
+  border: 1px solid;
+  white-space: nowrap;
+}
 .clf-fab-seg-count {
-  font-size: 0.59rem;
+  font-size: 0.58rem;
   font-family: var(--ff-mono);
   color: var(--tx3);
+  white-space: nowrap;
 }
 
-/* Barra de progreso del segmento */
+/* ── Barra de progreso ── */
 .clf-fab-seg-track {
-  height: 2.5px;
-  background: rgba(74, 184, 212, 0.09);
+  height: 2px;
+  background: rgba(74, 184, 212, 0.08);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -2297,6 +2316,14 @@ input[type="range"]:hover::-webkit-slider-thumb {
   height: 100%;
   border-radius: 2px;
   transition: width 0.7s ease;
+}
+
+/* ── Fila 2: acciones (reset + toggle) ── */
+.clf-fab-seg-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1px;
 }
 
 /* ── Pie del panel ── */
@@ -2322,11 +2349,11 @@ input[type="range"]:hover::-webkit-slider-thumb {
 .clf-toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   cursor: pointer;
   background: none;
   border: none;
-  padding: 2px 0;
+  padding: 0;
   color: inherit;
   flex-shrink: 0;
 }
@@ -2364,12 +2391,17 @@ input[type="range"]:hover::-webkit-slider-thumb {
   box-shadow: 0 0 7px rgba(74, 184, 212, 0.75);
 }
 .clf-auto-label {
-  font-size: 0.62rem;
-  color: var(--aurora);
+  font-size: 0.57rem;
+  color: rgba(74, 184, 212, 0.5);
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
+  font-family: var(--ff-mono);
   line-height: 1;
+  transition: color 0.2s ease;
+}
+.clf-toggle--on .clf-auto-label {
+  color: #4ab8d4;
 }
 
 /* ── FAB con modo auto activo ── */
@@ -2390,33 +2422,35 @@ input[type="range"]:hover::-webkit-slider-thumb {
     0 0 20px rgba(74,184,212,0.3);
 }
 
-/* ── Botón reset por segmento ── */
+/* ── Botón reset ── */
 .clf-reset-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
+  gap: 4px;
   height: 18px;
+  padding: 0 6px 0 4px;
   border-radius: 4px;
   background: none;
   border: 1px solid transparent;
   cursor: pointer;
-  color: rgba(74, 184, 212, 0.28);
-  padding: 0;
+  color: rgba(74, 184, 212, 0.25);
+  font-size: 0.56rem;
+  font-family: var(--ff-mono);
+  letter-spacing: 0.03em;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-  flex-shrink: 0;
   opacity: 0;
 }
 .clf-fab-seg:hover .clf-reset-btn {
   opacity: 1;
+  color: rgba(74, 184, 212, 0.45);
 }
 .clf-reset-btn:hover {
-  color: #e84c3c;
-  border-color: rgba(232, 76, 60, 0.3);
-  background: rgba(232, 76, 60, 0.07);
+  color: #e84c3c !important;
+  border-color: rgba(232, 76, 60, 0.28);
+  background: rgba(232, 76, 60, 0.06);
 }
 .clf-reset-btn:active {
-  transform: scale(0.88);
+  transform: scale(0.92);
   transition-duration: 0.08s;
 }
 
