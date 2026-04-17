@@ -311,6 +311,15 @@ export default function GuionesModule() {
       .catch(() => {})
   }, [classifierLanguage])
 
+  const resetSegment = useCallback((seg) => {
+    const uid = userIdRef.current
+    if (!uid) return
+    const lang = classifierLanguage || "es"
+    fetch(`${API}/classifier/reset/${uid}/${seg}?language_code=${lang}`, { method: "DELETE" })
+      .catch(() => {})
+      .finally(() => fetchClassifierStatus())
+  }, [classifierLanguage, fetchClassifierStatus])
+
   // Fetch on mount and whenever the active classifier language changes
   useEffect(() => { fetchClassifierStatus() }, [fetchClassifierStatus])
 
@@ -446,6 +455,7 @@ export default function GuionesModule() {
           onAutonomousChange={(seg, val) => setAutonomousMode(prev => ({ ...prev, [seg]: val }))}
           classifierLanguage={classifierLanguage}
           onLanguageChange={(lang) => { setClassifierLanguage(lang); fetchClassifierStatus(lang) }}
+          onResetSegment={resetSegment}
         />
 
         {tab === "editor" && (

@@ -35,7 +35,9 @@
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"floating button FAB overlay panel animation dark\" --domain ux)",
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"z-index overlay tooltip popover panel\" --domain ux)",
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphism panel card\" --domain style)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Read(//d/DOCUMENTOS USUARIO/Desktop/**)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphic toggle switch FAB glow pulse compact panel\" --design-system -f markdown)"
     ]
   }
 }

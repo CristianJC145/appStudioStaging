@@ -2112,7 +2112,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
 /* ── Panel flotante glassmorphic ── */
 .clf-fab-panel {
   pointer-events: none;
-  width: 272px;
+  width: 295px;
   background: rgba(4, 8, 13, 0.97);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
@@ -2265,7 +2265,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   font-size: 0.66rem;
   color: var(--tx2);
   font-family: var(--ff-mono);
-  min-width: 82px;
+  min-width: 70px;
 }
 .clf-fab-seg-level {
   font-size: 0.6rem;
@@ -2318,28 +2318,50 @@ input[type="range"]:hover::-webkit-slider-thumb {
   }
 }
 
-/* ── Toggle autónomo ── */
-.clf-auto-toggle {
+/* ── Toggle autónomo (pill switch) ── */
+.clf-toggle {
   display: flex;
   align-items: center;
   gap: 5px;
   cursor: pointer;
-  padding: 2px 8px;
-  border: 1px solid var(--bd-soft);
-  border-radius: var(--r-pill);
-  background: rgba(74,184,212,0.06);
-  transition: background var(--t), border-color var(--t);
-  user-select: none;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: inherit;
+  flex-shrink: 0;
 }
-.clf-auto-toggle:hover {
-  background: rgba(74,184,212,0.12);
-  border-color: var(--bd-mid);
+.clf-toggle-track {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: rgba(74, 184, 212, 0.08);
+  border: 1px solid rgba(74, 184, 212, 0.18);
+  position: relative;
+  transition: background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+  flex-shrink: 0;
 }
-.clf-auto-toggle input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
-  accent-color: var(--aurora);
-  cursor: pointer;
+.clf-toggle--on .clf-toggle-track {
+  background: rgba(74, 184, 212, 0.22);
+  border-color: rgba(74, 184, 212, 0.6);
+  box-shadow: 0 0 10px rgba(74, 184, 212, 0.3);
+}
+.clf-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(74, 184, 212, 0.4);
+  transition:
+    transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.22s ease,
+    box-shadow 0.22s ease;
+}
+.clf-toggle--on .clf-toggle-knob {
+  transform: translateX(12px);
+  background: #4ab8d4;
+  box-shadow: 0 0 7px rgba(74, 184, 212, 0.75);
 }
 .clf-auto-label {
   font-size: 0.62rem;
@@ -2347,6 +2369,132 @@ input[type="range"]:hover::-webkit-slider-thumb {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  line-height: 1;
+}
+
+/* ── FAB con modo auto activo ── */
+@keyframes clf-pulse-ring {
+  0%   { box-shadow: 0 4px 20px rgba(0,0,0,0.45), 0 0 0 0   rgba(74,184,212,0.45); }
+  65%  { box-shadow: 0 4px 20px rgba(0,0,0,0.45), 0 0 0 9px rgba(74,184,212,0);    }
+  100% { box-shadow: 0 4px 20px rgba(0,0,0,0.45), 0 0 0 0   rgba(74,184,212,0);    }
+}
+.clf-fab--auto-on {
+  border-color: rgba(74, 184, 212, 0.65);
+  animation: clf-pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.clf-fab--auto-on.clf-fab--active {
+  animation: none;
+  border-color: rgba(74, 184, 212, 0.65);
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.45),
+    0 0 20px rgba(74,184,212,0.3);
+}
+
+/* ── Botón reset por segmento ── */
+.clf-reset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: rgba(74, 184, 212, 0.28);
+  padding: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  flex-shrink: 0;
+  opacity: 0;
+}
+.clf-fab-seg:hover .clf-reset-btn {
+  opacity: 1;
+}
+.clf-reset-btn:hover {
+  color: #e84c3c;
+  border-color: rgba(232, 76, 60, 0.3);
+  background: rgba(232, 76, 60, 0.07);
+}
+.clf-reset-btn:active {
+  transform: scale(0.88);
+  transition-duration: 0.08s;
+}
+
+/* ── Botón info ── */
+.clf-info-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(74, 184, 212, 0.06);
+  border: 1px solid rgba(74, 184, 212, 0.16);
+  cursor: pointer;
+  color: rgba(74, 184, 212, 0.5);
+  font-size: 0.63rem;
+  font-weight: 800;
+  font-style: italic;
+  font-family: Georgia, serif;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.clf-info-btn:hover,
+.clf-info-btn--active {
+  background: rgba(74, 184, 212, 0.13);
+  border-color: rgba(74, 184, 212, 0.45);
+  color: #4ab8d4;
+}
+
+/* ── Panel de información de fases ── */
+.clf-info-panel {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+.clf-info-panel--open {
+  max-height: 280px;
+  opacity: 1;
+}
+.clf-info-inner {
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clf-info-phase {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.clf-info-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.clf-info-phase-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.clf-info-phase-name {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-family: var(--ff-mono);
+  line-height: 1;
+}
+.clf-info-phase-desc {
+  font-size: 0.57rem;
+  color: var(--tx3);
+  font-family: var(--ff-mono);
+  line-height: 1.48;
 }
 
 /* ── Badges de confianza en las cards ── */
