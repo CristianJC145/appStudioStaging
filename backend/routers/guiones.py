@@ -664,25 +664,85 @@ def _construir_bloques(texto: str, cfg: Config,
         else:
             fusionados.append(buffer)
 
+    # --- NUEVA LÓGICA: División por pausas menores para evitar sobrepasar límites ---
+    def _dividir_por_comas(texto_largo: str) -> list[str]:
+        """
+        Divide un texto excepcionalmente largo buscando pausas menores (comas, 
+        punto y coma, dos puntos) o, en el peor caso, por espacios (palabras).
+        """
+        if len(texto_largo) <= max_chars:
+            return [texto_largo]
+
+        # 1. Intentar dividir por pausas menores (, ; :) seguidas de espacio
+        partes = re.split(r'(?<=[,;:])\s+', texto_largo)
+        
+        # Si no hubo comas, forzamos división por palabras (espacios puros)
+        if len(partes) <= 1:
+            palabras = texto_largo.split(' ')
+            ensamblados = []
+            temp = ""
+            for p in palabras:
+                if len(temp) + len(p) + 1 <= max_chars:
+                    temp += (" " if temp else "") + p
+                else:
+                    if temp: ensamblados.append(temp)
+                    temp = p
+            if temp: ensamblados.append(temp)
+            return ensamblados
+
+        # 2. Ensamblar las partes divididas por comas respetando max_chars
+        ensamblados = []
+        temp = ""
+        for p in partes:
+            # Si una sub-parte (entre comas) sigue siendo gigantesca, recursividad
+            if len(p) > max_chars:
+                if temp:
+                    ensamblados.append(temp)
+                    temp = ""
+                ensamblados.extend(_dividir_por_comas(p))
+            elif len(temp) + len(p) + 1 <= max_chars:
+                temp += (" " if temp else "") + p
+            else:
+                if temp: ensamblados.append(temp)
+                temp = p
+        if temp:
+            ensamblados.append(temp)
+        
+        return ensamblados
+    # ---------------------------------------------------------------------------------
+
     bloques: list[str] = []
     for bloque in fusionados:
         if len(bloque) <= max_chars:
             bloques.append(bloque)
         else:
+            # División primaria por puntos
             oraciones = re.split(r'(?<=[.!?])\s+', bloque)
             bloque_actual = ""
             for oracion in oraciones:
+                # Chequeo normal: ¿Cabe en el bloque actual?
                 if len(bloque_actual) + len(oracion) + 2 <= max_chars:
                     bloque_actual += ("\n\n" if bloque_actual else "") + oracion
                 else:
                     if bloque_actual:
                         bloques.append(bloque_actual)
-                    bloque_actual = oracion
+                    
+                    # --- FIX APLICADO AQUÍ ---
+                    # Si la oración por sí sola excede el max_chars (ej. párrafos sin puntos)
+                    if len(oracion) > max_chars:
+                        sub_oraciones = _dividir_por_comas(oracion)
+                        # Añadimos todas menos la última al array final
+                        for sub_o in sub_oraciones[:-1]:
+                            bloques.append(sub_o)
+                        # La última queda como 'bloque_actual' para seguir concatenando si es posible
+                        bloque_actual = sub_oraciones[-1] if sub_oraciones else ""
+                    else:
+                        bloque_actual = oracion
+                    # -------------------------
             if bloque_actual:
                 bloques.append(bloque_actual)
 
     return bloques
-
 
 def _parsear_afirmaciones(texto: str) -> list[str]:
     """Devuelve las afirmaciones como lista de líneas individuales."""
