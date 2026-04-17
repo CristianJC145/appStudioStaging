@@ -29,22 +29,10 @@ const DEFAULT_CONFIG = {
   pausa_intro_a_afirm: 2000,
   pausa_afirm_a_medit: 3000,
   pausa_entre_meditaciones: 5000,
-  usar_ssml_breaks: true,
-  break_coma: 0.5,
-  break_punto: 0.7,
-  break_suspensivos: 0.8,
-  break_dos_puntos: 0.4,
-  break_punto_coma: 0.6,
-  break_guion: 0.5,
-  break_exclamacion: 0.7,
-  break_interrogacion: 0.7,
-  break_parrafo: 1.0,
   extend_silence: false,
   factor_coma: 1.0,
   factor_punto: 1.2,
   factor_suspensivos: 1.5,
-  silence_thresh_db: -40,
-  silence_min_ms: 80,
   max_chars_parrafo: 290,
   min_chars_parrafo: 220,
 }
@@ -89,23 +77,17 @@ function clearJobId(userId) {
 export default function GuionesModule() {
   const [tab, setTab] = useState("editor")
 
-  const [config, setConfig] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem("medi_config")
-      return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG
-    } catch { return DEFAULT_CONFIG }
-  })
+  const [config, setConfig] = useState(DEFAULT_CONFIG)
 
+  // Load config from DB on mount (persists across browsers and server resets)
   useEffect(() => {
-    const apiKey = config.api_key
-    if (!apiKey) return
-    fetch(`${API}/api/config?api_key=${encodeURIComponent(apiKey)}`)
+    const uid = getUserId()
+    if (!uid) return
+    fetch(`${API}/api/config?user_id=${uid}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && Object.keys(data).length > 0) {
-          const merged = { ...DEFAULT_CONFIG, ...data }
-          setConfig(merged)
-          sessionStorage.setItem("medi_config", JSON.stringify(merged))
+          setConfig(prev => ({ ...DEFAULT_CONFIG, ...prev, ...data }))
         }
       })
       .catch(() => {})
@@ -164,14 +146,14 @@ export default function GuionesModule() {
   const saveConfig = useCallback((nextOrUpdater) => {
     setConfig(prev => {
       const next = typeof nextOrUpdater === "function" ? nextOrUpdater(prev) : nextOrUpdater
-      sessionStorage.setItem("medi_config", JSON.stringify(next))
-      if (next.api_key) {
+      const uid = getUserId()
+      if (uid) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
           fetch(`${API}/api/config`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ config: next }),
+            body: JSON.stringify({ user_id: parseInt(uid), config: next }),
           }).catch(() => {})
         }, 1500)
       }

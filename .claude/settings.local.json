@@ -37,7 +37,8 @@
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphism panel card\" --domain style)",
       "Bash(python -c ' *)",
       "Read(//d/DOCUMENTOS USUARIO/Desktop/**)",
-      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphic toggle switch FAB glow pulse compact panel\" --design-system -f markdown)"
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphic toggle switch FAB glow pulse compact panel\" --design-system -f markdown)",
+      "Bash(xargs grep *)"
     ]
   }
 }

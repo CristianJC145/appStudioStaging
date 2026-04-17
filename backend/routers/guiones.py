@@ -21,6 +21,8 @@ from collections import defaultdict
 import statistics
 
 import base64
+import pymysql
+import pymysql.cursors
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -79,6 +81,36 @@ CONFIG_DIR      = Path("data") / "configs"
 USER_PREFS_DIR  = Path("data") / "user_prefs"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 USER_PREFS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── DB helpers (guiones config) ──────────────────────────────────────────────
+def _db_conn():
+    return pymysql.connect(
+        host=os.getenv("DB_HOST", "app-studio_db"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        user=os.getenv("DB_USER", "root"),
+        password=os.getenv("DB_PASS", ""),
+        database=os.getenv("DB_NAME", "studio_db"),
+        cursorclass=pymysql.cursors.DictCursor,
+        charset="utf8mb4",
+        autocommit=True,
+    )
+
+def _ensure_config_table():
+    try:
+        conn = _db_conn()
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS guiones_config (
+                    user_id INT NOT NULL PRIMARY KEY,
+                    config_json JSON NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+        conn.close()
+    except Exception as e:
+        print(f"[guiones] DB config table init warning: {e}")
+
+_ensure_config_table()
 
 # ── Claves predefinidas del equipo ───────────────────────────────────────────
 # Se leen de backend/.env — nunca hardcodear aquí.
@@ -1703,6 +1735,56 @@ def get_voices(api_key: str):
     except Exception:
         pass
     return []
+
+
+class GuionesConfigBody(BaseModel):
+    user_id: int
+    config: dict
+
+@router.get("/config")
+def get_guiones_config(user_id: int):
+    """Load persisted panel config for a user from DB."""
+    if not user_id:
+        raise HTTPException(status_code=422, detail="user_id requerido")
+    try:
+        conn = _db_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT config_json FROM guiones_config WHERE user_id=%s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        conn.close()
+        if row:
+            cfg = row["config_json"]
+            if isinstance(cfg, str):
+                cfg = json.loads(cfg)
+            return cfg
+    except Exception as e:
+        print(f"[guiones] get_config error: {e}")
+    return {}
+
+@router.post("/config")
+def save_guiones_config(body: GuionesConfigBody):
+    """Persist panel config for a user to DB."""
+    if not body.user_id:
+        raise HTTPException(status_code=422, detail="user_id requerido")
+    try:
+        conn = _db_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO guiones_config (user_id, config_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE config_json = %s, updated_at = CURRENT_TIMESTAMP
+                """,
+                (body.user_id, json.dumps(body.config), json.dumps(body.config)),
+            )
+        conn.close()
+        return {"ok": True}
+    except Exception as e:
+        print(f"[guiones] save_config error: {e}")
+        raise HTTPException(status_code=500, detail="Error guardando configuración")
 
 
 class UserPrefsBody(BaseModel):
