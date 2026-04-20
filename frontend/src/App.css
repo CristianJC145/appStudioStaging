@@ -3411,3 +3411,34 @@ input[type="range"]:hover::-webkit-slider-thumb {
   display: inline-block;
   transform-origin: center;
 }
+
+/* ── Mute button (on track labels) ── */
+.as-mute-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.45);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.as-mute-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.8);
+  border-color: rgba(255,255,255,0.2);
+}
+.as-mute-btn--muted {
+  background: rgba(239,83,80,0.15);
+  border-color: rgba(239,83,80,0.35);
+  color: #ef5350;
+}
+.as-mute-btn--muted:hover {
+  background: rgba(239,83,80,0.25);
+  color: #ff6b6b;
+}
