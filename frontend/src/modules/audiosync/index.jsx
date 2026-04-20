@@ -133,6 +133,24 @@ function buildSyncedFromSentences(esBuffer, esSr, enBuffer, enSr, esSents, enSen
   return { buffer: out, padded, overflow }
 }
 
+function encodeWAV16(buffer, sampleRate) {
+  const data = buffer.length * 2
+  const ab   = new ArrayBuffer(44 + data)
+  const v    = new DataView(ab)
+  const s    = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)) }
+  s(0, "RIFF"); v.setUint32(4, 36 + data, true); s(8, "WAVE"); s(12, "fmt ")
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
+  v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true)
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); s(36, "data"); v.setUint32(40, data, true)
+  let off = 44
+  for (let i = 0; i < buffer.length; i++) {
+    const sample = Math.max(-1, Math.min(1, buffer[i]))
+    const val    = Math.round(sample < 0 ? sample * 0x8000 : sample * 0x7FFF)
+    v.setInt16(off, val, true); off += 2
+  }
+  return ab
+}
+
 function encodeWAV24(buffer, sampleRate) {
   const data = buffer.length * 3
   const ab   = new ArrayBuffer(44 + data)
@@ -596,30 +614,60 @@ export default function AudioSyncModule() {
 
   // ── Transcription ────────────────────────────────────────────────────────
   const handleTranscribe = async (lang) => {
-    const file   = lang === "es" ? esFileRef.current : enFileRef.current
-    const setter = lang === "es" ? setTransES : setTransEN
-    if (!file) return
+    const bufRef = lang === "es" ? esBufferRef : enBufferRef
+    const srRef  = lang === "es" ? esSrRef     : enSrRef
+    const setter = lang === "es" ? setTransES  : setTransEN
+    if (!bufRef.current) return
 
     setter({ status: "loading", sentences: [], words: [], text: "", error: "" })
-    setStatusMsg(`Transcribiendo ${lang.toUpperCase()} con Whisper… (puede tardar ~30 s)`)
-
     const token = localStorage.getItem("studio_token")
-    const form  = new FormData()
-    form.append("file", file)
-    form.append("language", lang)
 
     try {
-      const res = await fetch(`${API}/api/audiosync/transcribe`, {
+      // Downsample to 16 kHz mono — Whisper's native format, ~3x smaller upload
+      setStatusMsg(`Comprimiendo ${lang.toUpperCase()} a 16 kHz…`)
+      const down16 = resample(bufRef.current, srRef.current, 16000)
+      const wavAb  = encodeWAV16(down16, 16000)
+      const blob   = new Blob([wavAb], { type: "audio/wav" })
+
+      // POST returns {job_id} immediately — no proxy timeout risk
+      setStatusMsg(`Subiendo ${lang.toUpperCase()}…`)
+      const form = new FormData()
+      form.append("file", blob, `audio_${lang}_16k.wav`)
+      form.append("language", lang)
+      const postRes = await fetch(`${API}/api/audiosync/transcribe`, {
         method: "POST", body: form,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `HTTP ${res.status}`)
+      if (!postRes.ok) {
+        const err = await postRes.json().catch(() => ({}))
+        throw new Error(err.detail || `HTTP ${postRes.status}`)
       }
-      const data = await res.json()
-      setter({ status: "done", sentences: data.sentences, words: data.words || [], text: data.text, error: "" })
-      setStatusMsg(`${lang.toUpperCase()} transcrito · ${data.sentences.length} oraciones detectadas`)
+      const { job_id } = await postRes.json()
+
+      // Poll every 3 s, timeout after 10 min
+      const deadline = Date.now() + 600_000
+      let   elapsed  = 0
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000))
+        elapsed += 3
+        setStatusMsg(`Procesando ${lang.toUpperCase()} con Whisper… ${elapsed}s`)
+
+        const pollRes = await fetch(`${API}/api/audiosync/transcribe/${job_id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!pollRes.ok) throw new Error(`Poll HTTP ${pollRes.status}`)
+        const job = await pollRes.json()
+
+        if (job.status === "done") {
+          setter({ status: "done", sentences: job.result.sentences, words: job.result.words || [], text: job.result.text, error: "" })
+          setStatusMsg(`${lang.toUpperCase()} transcrito · ${job.result.sentences.length} oraciones detectadas`)
+          return
+        }
+        if (job.status === "error") {
+          throw new Error(job.error || "Error en Whisper")
+        }
+      }
+      throw new Error("Tiempo de espera agotado (10 min). Intenta con un archivo más corto.")
     } catch (e) {
       setter({ status: "error", sentences: [], words: [], text: "", error: e.message })
       setStatusMsg(`Error transcribiendo ${lang.toUpperCase()}: ${e.message}`)
