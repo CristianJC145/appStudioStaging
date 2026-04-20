@@ -42,7 +42,9 @@
       "Bash(python skills/ui-ux-pro-max/scripts/search.py \"audio workstation DAW dark professional waveform editor\" --design-system -p \"AudioSync\")",
       "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"audio workstation DAW dark professional waveform editor\" --design-system -p \"AudioSync\")",
       "Bash(npx vite *)",
-      "Bash(node_modules/.bin/vite build *)"
+      "Bash(node_modules/.bin/vite build *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/LENOVO/Desktop/appStudioStaging/backend/routers/audiosync_router.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/LENOVO/Desktop/appStudioStaging/backend/main.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

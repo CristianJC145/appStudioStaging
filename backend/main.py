@@ -25,6 +25,12 @@ try:
 except Exception:
     _CLASSIFIER_ROUTER = None
 
+try:
+    from routers import audiosync_router as _audiosync_router
+    _AUDIOSYNC_ROUTER = _audiosync_router.router
+except Exception:
+    _AUDIOSYNC_ROUTER = None
+
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
@@ -51,6 +57,8 @@ app.include_router(bucles.router)
 app.include_router(generador.router)
 if _CLASSIFIER_ROUTER:
     app.include_router(_CLASSIFIER_ROUTER)
+if _AUDIOSYNC_ROUTER:
+    app.include_router(_AUDIOSYNC_ROUTER)
 
 # ── Health global ─────────────────────────────────────────────
 @app.get("/api/health")
