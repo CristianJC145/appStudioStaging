@@ -44,6 +44,15 @@ const modules = [
     status: "active",
     accent: "#d44e9a",
   },
+  {
+    id: "audiosync",
+    name: "AudioSync",
+    description: "Sincroniza audio en inglés con los tiempos de silencios del español. Editor DAW con visualización de formas de onda y exportación WAV 24-bit.",
+    icon: "◎",
+    path: "/studio/audiosync",
+    status: "active",
+    accent: "#00e676",
+  },
 ]
 
 export default modules

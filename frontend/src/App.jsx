@@ -12,6 +12,7 @@ import ModuleHub from "./components/ModuleHub"
 import GuionesModule    from "./modules/guiones"
 import BuclesModule     from "./modules/bucles"
 import GeneradorModule  from "./modules/generador"
+import AudioSyncModule  from "./modules/audiosync"
 import AdminPanel from "./pages/AdminPanel"
 import modules from "./modules/registry"
 import logoImg from "./assets/logo.png"
@@ -82,12 +83,20 @@ const IconPen = () => (
   </svg>
 )
 
+const IconSync = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>
+    <line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/>
+  </svg>
+)
+
 const MODULE_ICONS = {
   guiones:    IconWave,
   miniaturas: IconMonitor,
   bucles:     IconLoop,
   imagenes:   IconImage,
   generador:  IconPen,
+  audiosync:  IconSync,
 }
 
 /* ── Module disabled screen ──────────────────────────────────── */
@@ -318,6 +327,7 @@ function Shell() {
           <Route path="guiones/*"       element={<ModuleGate id="guiones"   name="Automatización de Audios"    states={moduleStates}><GuionesModule   /></ModuleGate>} />
           <Route path="bucles/*"        element={<ModuleGate id="bucles"    name="Bucles de Video"             states={moduleStates}><BuclesModule    /></ModuleGate>} />
           <Route path="generador/*"     element={<ModuleGate id="generador" name="Generador de Guiones IA"     states={moduleStates}><GeneradorModule /></ModuleGate>} />
+          <Route path="audiosync/*"     element={<ModuleGate id="audiosync" name="AudioSync"                   states={moduleStates}><AudioSyncModule /></ModuleGate>} />
           <Route path="admin"           element={isAdmin ? <AdminPanel /> : <Navigate to="/studio" replace />} />
         </Routes>
       </main>

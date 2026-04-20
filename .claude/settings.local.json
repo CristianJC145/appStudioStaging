@@ -38,7 +38,11 @@
       "Bash(python -c ' *)",
       "Read(//d/DOCUMENTOS USUARIO/Desktop/**)",
       "Bash(python skills/ui-ux-pro-max/scripts/search.py \"dark glassmorphic toggle switch FAB glow pulse compact panel\" --design-system -f markdown)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"audio workstation DAW dark professional waveform editor\" --design-system -p \"AudioSync\")",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"audio workstation DAW dark professional waveform editor\" --design-system -p \"AudioSync\")",
+      "Bash(npx vite *)",
+      "Bash(node_modules/.bin/vite build *)"
     ]
   }
 }
