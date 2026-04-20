@@ -28,51 +28,31 @@ function resample(buf, fromSr, toSr) {
 }
 
 /**
- * Force EN word-level tokens into exactly nTarget sentence groups.
- * Uses the nTarget-1 largest inter-word silence gaps as boundaries.
- * This fixes Whisper grouping EN differently than ES (e.g. 2 groups vs 3).
+ * Group word-level tokens into phrase segments using punctuation boundaries.
+ * A new segment starts after any word containing ., ,, ? or !.
+ * This preserves grammatical structure from WhisperX forced alignment.
  */
-function forceNSegments(words, nTarget, fallback) {
-  if (!words || words.length === 0 || nTarget <= 0) return fallback
-  if (nTarget === 1) {
-    return [{
-      text:  words.map(w => w.word).join("").trim(),
-      start: words[0].start,
-      end:   words[words.length - 1].end,
-    }]
+function extractPhrasesByPunctuation(words) {
+  if (!words || words.length === 0) return []
+  const phrases = []
+  let group = []
+
+  for (let i = 0; i < words.length; i++) {
+    group.push(words[i])
+    const isLast   = i === words.length - 1
+    const hasPunct = /[.,?!]/.test(words[i].word)
+
+    if (hasPunct || isLast) {
+      phrases.push({
+        text:  group.map(w => w.word).join("").trim(),
+        start: group[0].start,
+        end:   group[group.length - 1].end,
+      })
+      group = []
+    }
   }
-  // Already correct count — no forcing needed
-  if (fallback.length === nTarget) return fallback
 
-  // Find all inter-word gaps sorted by size (largest = natural sentence pauses)
-  const gaps = []
-  for (let i = 0; i < words.length - 1; i++) {
-    gaps.push({ size: words[i + 1].start - words[i].end, idx: i })
-  }
-  gaps.sort((a, b) => b.size - a.size)
-
-  // Take top nTarget-1 gaps as sentence boundaries
-  const boundaries = gaps
-    .slice(0, nTarget - 1)
-    .map(g => g.idx)
-    .sort((a, b) => a - b)
-
-  // Split words into nTarget groups at those boundaries
-  const groups = []
-  let start = 0
-  for (const boundary of boundaries) {
-    const slice = words.slice(start, boundary + 1)
-    if (slice.length) groups.push(slice)
-    start = boundary + 1
-  }
-  const last = words.slice(start)
-  if (last.length) groups.push(last)
-
-  return groups.map(g => ({
-    text:  g.map(w => w.word).join("").trim(),
-    start: g[0].start,
-    end:   g[g.length - 1].end,
-  }))
+  return phrases
 }
 
 /**
@@ -95,6 +75,7 @@ function buildSyncedFromSentences(esBuffer, esSr, enBuffer, enSr, esSents, enSen
   let outputTime   = 0   // position in the output so far (seconds)
   let padded       = 0
   let overflow     = 0
+  const OVERFLOW_TOLERANCE = 0.150  // 150 ms — let EN flow naturally within this window
 
   for (let i = 0; i < n; i++) {
     const esS = esSents[i]
@@ -106,10 +87,11 @@ function buildSyncedFromSentences(esBuffer, esSr, enBuffer, enSr, esSents, enSen
       chunks.push(new Float32Array(Math.round(silSecs * TARGET_SR)))
       outputTime = esS.start
       if (i > 0) padded++  // first sentence has natural leading silence, not counted as "padded"
-    } else if (outputTime > esS.start) {
-      // Previous EN sentence overflowed: EN starts slightly late, no silence added
+    } else if (outputTime > esS.start + OVERFLOW_TOLERANCE) {
+      // EN is more than 150 ms late — count as overflow, let it flow naturally
       overflow++
     }
+    // Within 0–150 ms of ES start: EN flows naturally, no silence inserted
 
     // Insert EN speech content for this sentence
     const s0 = Math.max(0, Math.round(enS.start * TARGET_SR))
@@ -467,7 +449,6 @@ export default function AudioSyncModule() {
   const activeRef        = useRef("both")
   const transESRef       = useRef(IDLE_TRANS)
   const transENRef       = useRef(IDLE_TRANS)
-  const enForcedRef      = useRef([])
   const esMutedRef       = useRef(false)
   const enMutedRef       = useRef(false)
 
@@ -478,7 +459,6 @@ export default function AudioSyncModule() {
   const [enLoading,    setEnLoading]    = useState(false)
   const [transES,      setTransES]      = useState(IDLE_TRANS)
   const [transEN,      setTransEN]      = useState(IDLE_TRANS)
-  const [enForcedSents,setEnForcedSents]= useState([])
   const [esMuted,      setEsMuted]      = useState(false)
   const [enMuted,      setEnMuted]      = useState(false)
   const [zoom,         setZoom]         = useState(100)
@@ -498,7 +478,6 @@ export default function AudioSyncModule() {
   useEffect(() => { activeRef.current    = active    }, [active])
   useEffect(() => { transESRef.current   = transES   }, [transES])
   useEffect(() => { transENRef.current   = transEN   }, [transEN])
-  useEffect(() => { enForcedRef.current  = enForcedSents }, [enForcedSents])
   useEffect(() => { esMutedRef.current   = esMuted   }, [esMuted])
   useEffect(() => { enMutedRef.current   = enMuted   }, [enMuted])
 
@@ -510,24 +489,17 @@ export default function AudioSyncModule() {
     if (enGainRef.current) enGainRef.current.gain.value = enMuted ? 0 : 1
   }, [enMuted])
 
-  // ── Auto force-resegment EN when both transcriptions complete ────────────
-  const esCount = transES.sentences.length
+  // ── Status message when both transcriptions complete ────────────────────
   useEffect(() => {
-    if (transES.status !== "done" || transEN.status !== "done") {
-      setEnForcedSents([])
-      enForcedRef.current = []
-      return
-    }
-    const forced = forceNSegments(transEN.words, esCount, transEN.sentences)
-    setEnForcedSents(forced)
-    enForcedRef.current = forced
-    if (forced.length !== transEN.sentences.length) {
-      setStatusMsg(`Transcripciones listas · ES: ${esCount} oraciones · EN ajustado: ${transEN.sentences.length} → ${forced.length}`)
+    if (transES.status !== "done" || transEN.status !== "done") return
+    const esN = transES.sentences.length
+    const enN = transEN.sentences.length
+    if (esN === enN) {
+      setStatusMsg(`Transcripciones listas · ${esN} frases en ambos idiomas · listo para sincronizar`)
     } else {
-      setStatusMsg(`Transcripciones listas · ${esCount} oraciones en ambos idiomas · listo para sincronizar`)
+      setStatusMsg(`Transcripciones listas · ES: ${esN} frases · EN: ${enN} frases · listo para sincronizar`)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transES.status, transEN.status, esCount])
+  }, [transES.status, transEN.status, transES.sentences.length, transEN.sentences.length])
 
   // ── Canvas resize ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -560,10 +532,7 @@ export default function AudioSyncModule() {
 
     if (enCanvasRef.current) {
       const isSync = activeRef.current === "synced"
-      // When synced, use ES sentence boundaries (EN is now aligned to ES)
-      const sents = isSync
-        ? transESRef.current.sentences
-        : (enForcedRef.current.length > 0 ? enForcedRef.current : transENRef.current.sentences)
+      const sents = isSync ? transESRef.current.sentences : transENRef.current.sentences
       renderTrack(
         enCanvasRef.current,
         isSync ? syncedBufferRef.current : enBufferRef.current,
@@ -576,7 +545,7 @@ export default function AudioSyncModule() {
     }
   }, [])
 
-  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, enForcedSents, active, renderAll])
+  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, active, renderAll])
 
   // ── Audio decode helper ──────────────────────────────────────────────────
   const decodeFile = async (file) => {
@@ -659,8 +628,11 @@ export default function AudioSyncModule() {
         const job = await pollRes.json()
 
         if (job.status === "done") {
-          setter({ status: "done", sentences: job.result.sentences, words: job.result.words || [], text: job.result.text, error: "" })
-          setStatusMsg(`${lang.toUpperCase()} transcrito · ${job.result.sentences.length} oraciones detectadas`)
+          const words   = job.result.words || []
+          const phrases = extractPhrasesByPunctuation(words)
+          const sentences = phrases.length > 0 ? phrases : job.result.sentences
+          setter({ status: "done", sentences, words, text: job.result.text, error: "" })
+          setStatusMsg(`${lang.toUpperCase()} transcrito · ${sentences.length} frases detectadas`)
           return
         }
         if (job.status === "error") {
@@ -680,8 +652,7 @@ export default function AudioSyncModule() {
       setStatusMsg("Carga ambos audios primero"); return
     }
     const esS = transESRef.current.sentences
-    // Use forced (re-segmented) EN sentences — same count as ES
-    const enS = enForcedRef.current.length > 0 ? enForcedRef.current : transENRef.current.sentences
+    const enS = transENRef.current.sentences
     if (esS.length === 0 || enS.length === 0) {
       setStatusMsg("Transcribe ambos audios antes de sincronizar"); return
     }
@@ -872,9 +843,8 @@ export default function AudioSyncModule() {
     return `${String(m).padStart(2, "0")}:${String(Math.floor(sc)).padStart(2, "0")}.${String(Math.floor((sc % 1) * 100)).padStart(2, "0")}`
   }
 
-  const canSync    = transES.status === "done" && transEN.status === "done"
-  const canExport  = !!syncedBufferRef.current
-  const enDispSents = enForcedSents.length > 0 ? enForcedSents : transEN.sentences
+  const canSync   = transES.status === "done" && transEN.status === "done"
+  const canExport = !!syncedBufferRef.current
 
   // ─────────────────────────────────────────────────────────────────────────
   //  RENDER
@@ -977,7 +947,7 @@ export default function AudioSyncModule() {
             />
             <TransPanel
               color={COLOR_EN} trackId="en" trans={transEN}
-              forcedCount={enForcedSents.length > 0 ? enForcedSents.length : null}
+              forcedCount={null}
               hasFile={!!enName} onTranscribe={handleTranscribe}
             />
             <div className="as-trans-hint">
@@ -1062,7 +1032,7 @@ export default function AudioSyncModule() {
                 <span style={{ fontSize: "0.59rem", color: "rgba(255,255,255,0.28)" }}>
                   {active === "synced"
                     ? (stats ? `${stats.n} or.` : "—")
-                    : (enDispSents.length > 0 ? `${enDispSents.length} or.` : "—")
+                    : (transEN.sentences.length > 0 ? `${transEN.sentences.length} or.` : "—")
                   }
                 </span>
               </div>

@@ -4,18 +4,19 @@ AudioSync — Transcription endpoint (async job queue)
 POST /api/audiosync/transcribe
   - Receives audio + language
   - Immediately returns { job_id, status: "processing" }
-  - Whisper runs in a background daemon thread
+  - WhisperX runs in a background daemon thread
 
 GET /api/audiosync/transcribe/{job_id}
   - Returns { status, result, error }
   - Poll every 3-5 s until status is "done" or "error"
 
 Why async?
-  Whisper base on CPU takes ~1x real-time.  A 20-min audio takes ~20 min.
+  WhisperX on CPU takes ~1x real-time.  A 20-min audio takes ~20 min.
   Returning a job_id immediately avoids proxy/browser timeouts on large files.
   The frontend sends a downsampled 16-kHz mono WAV (Whisper's native format),
   which is ~3-8x smaller than the original, also reducing upload time.
 """
+import gc
 import os
 import tempfile
 import threading
@@ -27,23 +28,11 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 router = APIRouter(tags=["audiosync"])
 
-# ── Whisper model name (override with env var AUDIOSYNC_WHISPER_MODEL) ────────
+# ── WhisperX configuration for CPU-only VPS ──────────────────────────────────
 WHISPER_MODEL_NAME = os.getenv("AUDIOSYNC_WHISPER_MODEL", "base")
-
-_model_cache: dict = {}
-_model_lock = threading.Lock()
-
-
-def _load_model():
-    with _model_lock:
-        if WHISPER_MODEL_NAME not in _model_cache:
-            try:
-                import whisper as _w
-                _model_cache[WHISPER_MODEL_NAME] = _w.load_model(WHISPER_MODEL_NAME)
-            except Exception as exc:
-                raise RuntimeError(str(exc)) from exc
-    return _model_cache[WHISPER_MODEL_NAME]
-
+DEVICE             = "cpu"
+COMPUTE_TYPE       = "int8"
+BATCH_SIZE         = 1
 
 # ── In-memory job store ───────────────────────────────────────────────────────
 # { job_id: { status, result, error, created_at } }
@@ -63,20 +52,8 @@ def _cleanup_old_jobs():
 
 # ── Background transcription thread ──────────────────────────────────────────
 
-def _result_to_sentences(result: dict) -> list[dict]:
-    return [
-        {
-            "text":  seg["text"].strip(),
-            "start": round(seg["start"], 3),
-            "end":   round(seg["end"],   3),
-        }
-        for seg in result.get("segments", [])
-        if seg.get("text", "").strip()
-    ]
-
-
 def _run_job(job_id: str, audio_bytes: bytes, filename: str, language: str):
-    """Daemon thread: write temp file → run Whisper → store result."""
+    """Daemon thread: write temp file → WhisperX transcribe + align → store result."""
     suffix   = Path(filename or "audio.wav").suffix or ".wav"
     tmp_path = None
     try:
@@ -84,28 +61,55 @@ def _run_job(job_id: str, audio_bytes: bytes, filename: str, language: str):
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
-        lang  = language if language not in ("auto", "") else None
-        model = _load_model()
-        result = model.transcribe(
-            tmp_path,
-            language=language,
-            word_timestamps=True,
-            verbose=False,
-            fp16=False,
-        )
+        lang = language if language not in ("auto", "") else None
 
-        sentences = _result_to_sentences(result)
-        words = [
-            {"word": w["word"], "start": round(w["start"], 3), "end": round(w["end"], 3)}
-            for seg in result.get("segments", [])
-            for w in seg.get("words", [])
-        ]
+        import whisperx
+
+        # Step 1 — Transcribe
+        model  = whisperx.load_model(WHISPER_MODEL_NAME, device=DEVICE, compute_type=COMPUTE_TYPE)
+        result = model.transcribe(tmp_path, batch_size=BATCH_SIZE, language=lang)
+        detected_lang = result.get("language", lang or "es")
+        del model
+        gc.collect()
+
+        # Step 2 — Forced alignment (word-level timestamps)
+        model_a, metadata = whisperx.load_align_model(
+            language_code=detected_lang, device=DEVICE
+        )
+        result = whisperx.align(
+            result["segments"], model_a, metadata, tmp_path,
+            device=DEVICE, return_char_alignments=False,
+        )
+        del model_a
+        gc.collect()
+
+        # Format sentences from aligned segments
+        sentences = []
+        for seg in result.get("segments", []):
+            text = seg.get("text", "").strip()
+            if text and "start" in seg and "end" in seg:
+                sentences.append({
+                    "text":  text,
+                    "start": round(seg["start"], 3),
+                    "end":   round(seg["end"],   3),
+                })
+
+        # Format words — only include words that have both start AND end attributes
+        words = []
+        for seg in result.get("segments", []):
+            for w in seg.get("words", []):
+                if "start" in w and "end" in w:
+                    words.append({
+                        "word":  w["word"],
+                        "start": round(w["start"], 3),
+                        "end":   round(w["end"],   3),
+                    })
 
         with _jobs_lock:
             _jobs[job_id].update({
                 "status": "done",
                 "result": {
-                    "text":      result.get("text", "").strip(),
+                    "text":      " ".join(s["text"] for s in sentences),
                     "sentences": sentences,
                     "words":     words,
                 },
@@ -135,9 +139,9 @@ async def transcribe_start(
     The client should poll GET /api/audiosync/transcribe/{job_id}.
     """
     try:
-        import whisper  # noqa: F401
+        import whisperx  # noqa: F401
     except ImportError:
-        raise HTTPException(503, "Whisper no está disponible en este servidor")
+        raise HTTPException(503, "WhisperX no está disponible en este servidor")
 
     _cleanup_old_jobs()
 
