@@ -13,6 +13,14 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libgomp1 \
     wget \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. EL HACK DEVOPS: Descargar execstack del archivo histórico de Debian

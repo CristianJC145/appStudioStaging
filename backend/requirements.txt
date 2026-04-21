@@ -18,7 +18,10 @@ openai-whisper==20250625
 torch
 torchaudio
 
-# Usar la última versión de WhisperX (evita el crash de compilación de PyAV)
+# Fijar av ANTES de whisperx para evitar el crash de compilación con Cython 3.x
+av==12.3.0
+
+# Usar la última versión de WhisperX
 whisperx
 
 # Librerías de análisis acústico
