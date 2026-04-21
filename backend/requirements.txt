@@ -18,11 +18,13 @@ openai-whisper==20250625
 torch
 torchaudio
 
-# WhisperX sin restricciones de versión
-whisperx
+# LA COMBINACIÓN GANADORA (Sin bugs de seguridad, sin conflictos de Numpy)
+ctranslate2==3.24.0
+whisperx==3.1.1
 
-# Librería de análisis acústico
-librosa
+# Librerías de análisis acústico
+librosa>=0.10.0
+numpy<2.0.0
 
 # LLMs y APIs
 anthropic>=0.30.0
