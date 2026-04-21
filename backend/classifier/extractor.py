@@ -14,6 +14,14 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Callable
 import string
+import logging
+import traceback
+
+# Configurar el logger para que Uvicorn/Docker no lo silencien
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -30,8 +38,11 @@ except ImportError:
 try:
     import whisperx
     WHISPERX_AVAILABLE = True
-except ImportError:
+    logger.info("✅ WhisperX importado correctamente al iniciar el servidor.")
+except Exception as e:
     WHISPERX_AVAILABLE = False
+    logger.error(f"❌ ERROR CRÍTICO IMPORTANDO WHISPERX EN EL ARRANQUE: {e}")
+    logger.error(traceback.format_exc())
 
 try:
     import librosa as _librosa_lib
@@ -90,9 +101,16 @@ def _get_whisperx_model():
     if _whisperx_model is None:
         with _whisperx_model_lock:
             if _whisperx_model is None:
-                _whisperx_model = whisperx.load_model(
-                    "base", device="cpu", compute_type="float32"
-                )
+                logger.info("⏳ Iniciando la carga del modelo WhisperX 'base' en memoria...")
+                try:
+                    _whisperx_model = whisperx.load_model(
+                        "base", device="cpu", compute_type="float32"
+                    )
+                    logger.info("✅ Modelo WhisperX cargado exitosamente.")
+                except Exception as e:
+                    logger.error(f"❌ ERROR CARGANDO LOS PESOS DE WHISPERX: {e}")
+                    logger.error(traceback.format_exc())
+                    raise e
     return _whisperx_model
 
 
@@ -280,29 +298,38 @@ def _transcribir_whisperx(
     audio_mono: "AudioSegment", texto_original: str, duracion_seg: float
 ) -> tuple:
     """Transcribe with WhisperX; return (texto_transcrito, coincidencia_pct, wpm)."""
+    logger.info("🎙️ Entrando a la función de transcripción de WhisperX...")
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp_path = f.name
         audio_mono.export(tmp_path, format="wav")
+        logger.info(f"📁 Audio temporal guardado en: {tmp_path}")
 
         model    = _get_whisperx_model()
+        logger.info("🧠 Pasando audio al modelo de transcripción...")
+        
         result   = model.transcribe(tmp_path, batch_size=8)
+        logger.info("✅ Transcripción completada. Extrayendo segmentos...")
+        
         segments = result.get("segments", [])
 
         texto_t = " ".join(s.get("text", "") for s in segments).strip()
-        # Use word-level data when available, else fall back to text split
         words   = [w for s in segments for w in s.get("words", [])]
         n_words = len(words) if words else len(texto_t.split())
         wpm     = round((n_words / duracion_seg) * 60, 1) if duracion_seg > 0 else 0.0
+        
         coincid = _token_overlap(texto_original, texto_t)
+        
+        logger.info(f"📊 Resultados - WPM: {wpm}, Coincidencia: {coincid}%")
         return texto_t, coincid, wpm
-    except Exception:
+    except Exception as e:
+        logger.error(f"❌ ERROR FATAL DURANTE LA TRANSCRIPCIÓN: {e}")
+        logger.error(traceback.format_exc())
         return None, None, 0.0
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
-
 
 # ── Pitch variation (ZCR) ─────────────────────────────────────────────────────
 
