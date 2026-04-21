@@ -14,12 +14,15 @@ bcrypt==4.0.1
 PyMySQL==1.1.1
 openai-whisper==20250625
 
-# PyTorch ligero (CPU)
-torch
-torchaudio
+# PyTorch ligero (CPU) - versiones fijas para compatibilidad con pyannote.audio
+torch==2.1.0+cpu
+torchaudio==2.1.0+cpu
 
 # Fijar av ANTES de whisperx para evitar el crash de compilación con Cython 3.x
 av==12.3.0
+
+# pyannote.audio compatible con torchaudio 2.1.x
+pyannote.audio==3.1.1
 
 # Usar la última versión de WhisperX
 whisperx
