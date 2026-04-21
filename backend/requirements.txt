@@ -12,11 +12,10 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyMySQL==1.1.1
-openai-whisper==20250625
 
-# PyTorch CPU - compatible con pyannote 3.3.2
-torch==2.2.0+cpu
-torchaudio==2.2.0+cpu
+# PyTorch CPU - suficientemente nuevo para transformers
+torch==2.4.0+cpu
+torchaudio==2.4.0+cpu
 
 # Fijar av ANTES de whisperx
 av==12.3.0
@@ -25,8 +24,8 @@ av==12.3.0
 pyannote.audio==3.3.2
 whisperx==3.3.1
 
-# numpy compatible con whisperx 3.3.x
-numpy>=2.0.2,<2.1.0
+# numpy 1.x para compatibilidad con módulos compilados
+numpy>=1.24.0,<2.0.0
 
 # Librerías de análisis acústico
 librosa>=0.10.0
@@ -44,3 +43,4 @@ pdfplumber>=0.10.0
 tiktoken>=0.7.0
 langdetect>=1.0.9
 python-dotenv>=1.0.0
+openai-whisper==20250625
