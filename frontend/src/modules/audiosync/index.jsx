@@ -197,7 +197,7 @@ function renderRuler(canvas, zoom, viewStart) {
   ctx.beginPath(); ctx.moveTo(0, H - 0.5); ctx.lineTo(W, H - 0.5); ctx.stroke()
 }
 
-function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, playhead, color, emptyMsg) {
+function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, playhead, color, emptyMsg, selection) {
   const ctx = canvas.getContext("2d")
   const W = canvas.width, H = canvas.height
   ctx.fillStyle = "#07090f"
@@ -272,6 +272,21 @@ function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, pla
     ctx.setLineDash([])
   }
 
+  // Selection overlay
+  if (selection && selection.end > selection.start) {
+    const xA = (selection.start - viewStart) * zoom
+    const xB = (selection.end   - viewStart) * zoom
+    if (xB > 0 && xA < W) {
+      const dA = Math.max(0, xA), dB = Math.min(W, xB)
+      ctx.fillStyle = "rgba(255,255,150,0.15)"
+      ctx.fillRect(dA, 0, dB - dA, H)
+      ctx.strokeStyle = "rgba(255,255,120,0.75)"
+      ctx.lineWidth = 1; ctx.setLineDash([])
+      if (xA >= 0 && xA <= W) { ctx.beginPath(); ctx.moveTo(xA, 0); ctx.lineTo(xA, H); ctx.stroke() }
+      if (xB >= 0 && xB <= W) { ctx.beginPath(); ctx.moveTo(xB, 0); ctx.lineTo(xB, H); ctx.stroke() }
+    }
+  }
+
   // Playhead
   const visEnd = viewStart + W / zoom
   if (playhead >= viewStart && playhead <= visEnd) {
@@ -300,6 +315,11 @@ const IcExport = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="non
 const IcUpload = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
 const IcVol    = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
 const IcMuted  = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+const IcCursor = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l14 9-8 1-4 7z"/></svg>
+const IcSelect = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2"/></svg>
+const IcCut    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+const IcSilence= () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.68 10.68a2 2 0 0 0 2.63 2.63M7 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3l5 5V8.28M20.69 20.69A16.8 16.8 0 0 0 21 18v-6M15.54 8.46A5 5 0 0 1 17 12v1"/></svg>
+const IcTrim   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="6" y="4" width="12" height="16" rx="1"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
 
 function IcSpinner() {
   return (
@@ -469,6 +489,11 @@ export default function AudioSyncModule() {
   const [statusMsg,    setStatusMsg]    = useState("Carga los dos archivos de audio para comenzar")
   const [stats,        setStats]        = useState(null)
   const [canvasW,      setCanvasW]      = useState(800)
+  const [editTool,     setEditTool]     = useState("cursor") // "cursor" | "select"
+  const [selection,    setSelection]    = useState(null)     // { track, start, end }
+  const [bufferVersion,setBufferVersion]= useState(0)
+  const selDragRef = useRef(null)  // { track, startT } during drag
+  const selRef     = useRef(null)  // mutable mirror of selection
 
   // Keep mutable refs in sync
   useEffect(() => { playheadRef.current  = playhead  }, [playhead])
@@ -480,6 +505,7 @@ export default function AudioSyncModule() {
   useEffect(() => { transENRef.current   = transEN   }, [transEN])
   useEffect(() => { esMutedRef.current   = esMuted   }, [esMuted])
   useEffect(() => { enMutedRef.current   = enMuted   }, [enMuted])
+  useEffect(() => { selRef.current       = selection }, [selection])
 
   // ── Live mute control (no need to restart playback) ──────────────────────
   useEffect(() => {
@@ -526,7 +552,8 @@ export default function AudioSyncModule() {
         esCanvasRef.current,
         esBufferRef.current, esSrRef.current,
         transESRef.current.sentences,
-        z, vs, ph, COLOR_ES, "Carga audio ES →"
+        z, vs, ph, COLOR_ES, "Carga audio ES →",
+        selRef.current?.track === "es" ? selRef.current : null
       )
     }
 
@@ -540,12 +567,13 @@ export default function AudioSyncModule() {
         sents,
         z, vs, ph,
         isSync ? COLOR_SY : COLOR_EN,
-        "Carga audio EN →"
+        "Carga audio EN →",
+        selRef.current?.track === "en" ? selRef.current : null
       )
     }
   }, [])
 
-  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, active, renderAll])
+  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, active, bufferVersion, selection, renderAll])
 
   // ── Audio decode helper ──────────────────────────────────────────────────
   const decodeFile = async (file) => {
@@ -765,6 +793,50 @@ export default function AudioSyncModule() {
 
   const handlePlayPause = () => isPlaying ? stopPlayback() : startPlayback()
 
+  // ── Edit operations ──────────────────────────────────────────────────────
+  const handleCut = () => {
+    if (!selection || selection.start >= selection.end) return
+    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    const s0  = Math.round(selection.start * srRef.current)
+    const s1  = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    const buf = bufRef.current
+    const out = new Float32Array(buf.length - (s1 - s0))
+    out.set(buf.subarray(0, s0), 0)
+    out.set(buf.subarray(s1), s0)
+    bufRef.current = out
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Cortado: ${((s1 - s0) / srRef.current).toFixed(2)}s eliminados de ${selection.track.toUpperCase()}`)
+  }
+
+  const handleSilence = () => {
+    if (!selection || selection.start >= selection.end) return
+    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    const s0 = Math.round(selection.start * srRef.current)
+    const s1 = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    bufRef.current.fill(0, s0, s1)
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Silenciados ${((s1 - s0) / srRef.current).toFixed(2)}s en ${selection.track.toUpperCase()}`)
+  }
+
+  const handleTrimToSelection = () => {
+    if (!selection || selection.start >= selection.end) return
+    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    const s0 = Math.round(selection.start * srRef.current)
+    const s1 = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    bufRef.current = bufRef.current.slice(s0, s1)
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Trim aplicado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${selection.track.toUpperCase()}`)
+  }
+
   // ── Export ───────────────────────────────────────────────────────────────
   const handleExport = () => {
     if (!syncedBufferRef.current) { setStatusMsg("Sincroniza primero"); return }
@@ -788,13 +860,34 @@ export default function AudioSyncModule() {
   }
 
   // ── Canvas interactions ──────────────────────────────────────────────────
-  const handleCanvasClick = (e) => {
+  const handleCanvasMouseDown = (e, trackId) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const t    = Math.max(0, viewStart + (e.clientX - rect.left) / zoom)
-    playheadRef.current = t; setPlayhead(t)
-    if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
-    else renderAll()
+    if (editTool === "select") {
+      selDragRef.current = { track: trackId, startT: t }
+      const sel = { track: trackId, start: t, end: t }
+      selRef.current = sel
+      setSelection(sel)
+    } else {
+      setSelection(null); selRef.current = null
+      playheadRef.current = t; setPlayhead(t)
+      if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
+      else renderAll()
+    }
   }
+
+  const handleCanvasMouseMove = (e, trackId) => {
+    if (!selDragRef.current || selDragRef.current.track !== trackId) return
+    const rect   = e.currentTarget.getBoundingClientRect()
+    const t      = Math.max(0, viewStart + (e.clientX - rect.left) / zoom)
+    const startT = selDragRef.current.startT
+    const sel    = { track: trackId, start: Math.min(startT, t), end: Math.max(startT, t) }
+    selRef.current = sel
+    setSelection(sel)
+    renderAll()
+  }
+
+  const handleCanvasMouseUp = () => { selDragRef.current = null }
 
   const handleWheel = useCallback((e) => {
     e.preventDefault()
@@ -830,6 +923,20 @@ export default function AudioSyncModule() {
     window.addEventListener("mouseup",   onUp)
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Spacebar play/pause ──────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return
+      if (e.code === "Space") {
+        e.preventDefault()
+        if (isPlayRef.current) stopPlayback()
+        else startPlayback()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [startPlayback, stopPlayback])
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const totalDur   = getMaxDur()
@@ -902,6 +1009,45 @@ export default function AudioSyncModule() {
             <IcExport /><span>EXPORTAR WAV</span>
           </button>
         </div>
+
+        <div className="as-toolbar-sep" />
+
+        <div className="as-toolbar-group">
+          <button
+            className={`as-btn${editTool === "cursor" ? " as-btn--active" : ""}`}
+            onClick={() => { setEditTool("cursor"); setSelection(null); selRef.current = null }}
+            title="Cursor — clic para mover cabezal (C)"
+          >
+            <IcCursor /><span>CURSOR</span>
+          </button>
+          <button
+            className={`as-btn${editTool === "select" ? " as-btn--edit-active" : ""}`}
+            onClick={() => setEditTool("select")}
+            title="Selección — arrastra para seleccionar región (S)"
+          >
+            <IcSelect /><span>SELEC.</span>
+          </button>
+        </div>
+
+        {selection && selection.end > selection.start && (
+          <>
+            <div className="as-toolbar-sep" />
+            <div className="as-toolbar-group">
+              <span style={{ fontSize: "0.63rem", color: "rgba(255,255,150,0.7)", paddingRight: 2, fontFamily: "monospace" }}>
+                {selection.track.toUpperCase()} {selection.start.toFixed(2)}–{selection.end.toFixed(2)}s
+              </span>
+              <button className="as-btn as-btn--danger" onClick={handleCut} title="Eliminar región seleccionada del buffer">
+                <IcCut /><span>CORTAR</span>
+              </button>
+              <button className="as-btn" onClick={handleSilence} title="Rellenar región con silencio">
+                <IcSilence /><span>SILENCIO</span>
+              </button>
+              <button className="as-btn" onClick={handleTrimToSelection} title="Conservar solo la región seleccionada">
+                <IcTrim /><span>TRIM</span>
+              </button>
+            </div>
+          </>
+        )}
 
         <div style={{ flex: 1 }} />
 
@@ -1003,7 +1149,11 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={esCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                onClick={handleCanvasClick} onWheel={handleWheel}
+                style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
+                onMouseDown={e => handleCanvasMouseDown(e, "es")}
+                onMouseMove={e => handleCanvasMouseMove(e, "es")}
+                onMouseUp={handleCanvasMouseUp}
+                onWheel={handleWheel}
               />
             </div>
 
@@ -1038,7 +1188,11 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={enCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                onClick={handleCanvasClick} onWheel={handleWheel}
+                style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
+                onMouseDown={e => handleCanvasMouseDown(e, "en")}
+                onMouseMove={e => handleCanvasMouseMove(e, "en")}
+                onMouseUp={handleCanvasMouseUp}
+                onWheel={handleWheel}
               />
             </div>
 

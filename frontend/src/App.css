@@ -3222,6 +3222,17 @@ input[type="range"]:hover::-webkit-slider-thumb {
   flex-shrink: 0;
 }
 
+/* ── Edit tool active ── */
+.as-btn--edit-active {
+  background: rgba(255,255,150,0.12);
+  border-color: rgba(255,255,120,0.45);
+  color: rgba(255,255,150,0.9);
+}
+.as-btn--edit-active:hover {
+  background: rgba(255,255,150,0.2);
+  border-color: rgba(255,255,120,0.65);
+}
+
 /* ── Sidebar title ── */
 .as-sidebar-title {
   font-size: 0.62rem;
