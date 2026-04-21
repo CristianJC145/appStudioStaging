@@ -18,13 +18,11 @@ openai-whisper==20250625
 torch
 torchaudio
 
-# Forzar la rama 3.x de CTranslate2 que NO tiene el bug de Executable Stack
-ctranslate2==3.24.0
+# WhisperX sin restricciones de versión
 whisperx
 
-# Librerías de análisis acústico
-librosa>=0.10.0
-numpy<2.0.0
+# Librería de análisis acústico
+librosa
 
 # LLMs y APIs
 anthropic>=0.30.0
