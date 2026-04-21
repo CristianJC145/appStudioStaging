@@ -14,16 +14,12 @@ bcrypt==4.0.1
 PyMySQL==1.1.1
 openai-whisper==20250625
 
-# PARCHE FINAL: Forzar PyAV moderno para evitar compilar C++ roto
-av>=10.0.0
-
 # PyTorch ligero (CPU)
 torch
 torchaudio
 
-# LA COMBINACIÓN GANADORA (Sin bugs de seguridad, sin conflictos de Numpy)
-ctranslate2==3.24.0
-whisperx==3.1.1
+# Usar la última versión de WhisperX (evita el crash de compilación de PyAV)
+whisperx
 
 # Librerías de análisis acústico
 librosa>=0.10.0

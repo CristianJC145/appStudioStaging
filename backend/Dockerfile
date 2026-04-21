@@ -4,7 +4,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Añadimos pkg-config y las cabeceras de desarrollo de FFmpeg para compilar PyAV
+# 1. Instalar dependencias base y la herramienta wget
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -12,20 +12,22 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
     libgomp1 \
-    pkg-config \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
-    libavfilter-dev \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+# 2. EL HACK DEVOPS: Descargar execstack del archivo histórico de Debian
+RUN wget http://archive.debian.org/debian/pool/main/p/prelink/execstack_0.0.20131005mac-1.1_amd64.deb \
+    && dpkg -i execstack_0.0.20131005mac-1.1_amd64.deb \
+    && rm execstack_*.deb
 
 COPY requirements.txt .
 
+# 3. Instalar dependencias de Python
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
+
+# 4. LA CIRUGÍA: Curar CTranslate2 del error "Executable Stack"
+RUN find /usr/local/lib/python3.11/site-packages -name "libctranslate2*.so*" -exec execstack -c {} +
 
 COPY . .
 
