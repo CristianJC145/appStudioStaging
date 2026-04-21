@@ -48,6 +48,8 @@ class FeedbackBody(BaseModel):
     decision:      str
     user_id:       Optional[int] = None
     language_code: str = "es"
+    calidad_score: Optional[int] = None   # 1-5 stars (approved audios)
+    razon_rechazo: Optional[list] = None  # label array (rejected audios)
 
 
 @router.get("/status/{user_id}")
@@ -96,6 +98,8 @@ def register_feedback(body: FeedbackBody):
             intento=1,
             params_elevenlabs=features.get("params_elevenlabs") or {},
             language_code=body.language_code,
+            calidad_score=body.calidad_score,
+            razon_rechazo=body.razon_rechazo,
         )
         if ok:
             threading.Thread(

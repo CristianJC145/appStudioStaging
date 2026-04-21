@@ -203,6 +203,26 @@ export default function GuionesModule() {
       if (evt.type === "medit_review_start") { setReviewSection("medit"); setJobStatus("awaiting_review"); setTab("review") }
       if (evt.type === "medit_review_done")  setReviewSection(null)
 
+      // ── Auto-rejected (WhisperX early discard) ───────────────────────────
+      if (evt.type === "intro_auto_rejected" || evt.type === "afirm_auto_rejected" || evt.type === "medit_auto_rejected") {
+        const sec = evt.data.section, idx = evt.data.index
+        const jid = jobIdRef.current
+        if (jid) {
+          // Auto-trigger regeneration — bad pronunciation detected by WhisperX
+          if (sec === "intro")  setIntroDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+          else if (sec === "afirm") setAfirmDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+          else setMeditDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+          fetch(`${API}/api/review`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              job_id: jid, section: sec, index: idx, decision: "regenerate",
+              razon_rechazo: ["mala_pronunciacion"],
+            }),
+          }).catch(() => {})
+        }
+      }
+
       // ── Classifier events ─────────────────────────────────────────────────
       if (evt.type === "intro_classified" || evt.type === "afirm_classified" || evt.type === "medit_classified") {
         const key = `${evt.data.section}_${evt.data.index}`
@@ -223,11 +243,11 @@ export default function GuionesModule() {
             if (sec === "intro")  setIntroDecisions(prev => ({ ...prev, [idx]: "ok" }))
             else if (sec === "afirm") setAfirmDecisions(prev => ({ ...prev, [idx]: "ok" }))
             else setMeditDecisions(prev => ({ ...prev, [idx]: "ok" }))
-            // Send to backend
+            // Send to backend (autonomous auto-approve — no calidad_score required)
             fetch(`${API}/api/review`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ job_id: jid, section: sec, index: idx, decision: "ok", new_text: null }),
+              body: JSON.stringify({ job_id: jid, section: sec, index: idx, decision: "ok", new_text: null, calidad_score: null, razon_rechazo: null }),
             }).catch(() => {})
           }
         }
@@ -355,7 +375,7 @@ export default function GuionesModule() {
     }
   }
 
-  const submitDecision = async (section, index, decision, newText = null) => {
+  const submitDecision = async (section, index, decision, newText = null, extras = {}) => {
     if (section === "intro") {
       setIntroDecisions(prev => ({ ...prev, [index]: decision }))
       if (newText && decision === "regenerate")
@@ -378,7 +398,12 @@ export default function GuionesModule() {
     await fetch(`${API}/api/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId, section, index, decision, new_text: newText || null }),
+      body: JSON.stringify({
+        job_id: jobId, section, index, decision,
+        new_text: newText || null,
+        calidad_score: extras.calidad_score ?? null,
+        razon_rechazo: extras.razon_rechazo ?? null,
+      }),
     })
   }
 

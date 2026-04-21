@@ -2,8 +2,9 @@
 Classifier Summarizer — Generates a compact distilled summary of user preferences
 using Claude API every 20 new training examples per segment.
 
-Cost: ~$0.04 per summary regeneration (uses Haiku).
-Runs entirely in daemon background threads.
+The summary correlates acoustic metrics (WPM, NISQA, Jitter, Shimmer, etc.)
+with human labels (calidad_score, razon_rechazo) to build the classifier's
+acoustic rule set. Runs entirely in daemon background threads.
 """
 import os
 import json
@@ -25,14 +26,11 @@ from classifier.storage import (
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 _MODEL = "claude-haiku-4-5-20251001"
 
-# Tracks how many examples were present when we last generated a summary
-# Key: f"{user_id}_{segmento}" → int
 _last_summarized      : dict[str, int] = {}
 _last_summarized_lock = threading.Lock()
 
 
 def limpiar_cache_segmento(user_id: int, segmento: str, language_code: str = "es"):
-    """Remove in-memory summary counter for a reset segment."""
     key = f"{user_id}_{segmento}_{language_code}"
     with _last_summarized_lock:
         _last_summarized.pop(key, None)
@@ -42,7 +40,6 @@ def verificar_y_regenerar_resumen(user_id: int, segmento: str, language_code: st
     """
     Check if a new summary is needed (every 20 new examples, min 30 total).
     If so, spawn a background thread to regenerate it.
-    Safe to call from any thread.
     """
     key = f"{user_id}_{segmento}_{language_code}"
     try:
@@ -83,9 +80,12 @@ def _generar_resumen(user_id: int, segmento: str, n_actual: int, language_code: 
         aprobados  = [e for e in ejemplos if e.get("decision") == "aprobado"]
         rechazados = [e for e in ejemplos if e.get("decision") == "rechazado"]
 
+        # Acoustic metrics used for statistical analysis
         fkeys = [
-            "duracion_seg", "tempo_bpm", "energia_promedio", "variacion_pitch",
-            "num_silencios", "duracion_promedio_silencio_seg", "coincidencia_texto",
+            "duracion_seg", "wpm", "densidad_silencios",
+            "energia_promedio", "variacion_pitch",
+            "jitter", "shimmer", "spectral_centroid", "nisqa_score",
+            "coincidencia_texto",
         ]
 
         def _stats(lst):
@@ -94,25 +94,52 @@ def _generar_resumen(user_id: int, segmento: str, n_actual: int, language_code: 
                 vals = [e[k] for e in lst if e.get(k) is not None]
                 if vals:
                     out[k] = {
-                        "min":  round(min(vals),              4),
-                        "max":  round(max(vals),              4),
-                        "mean": round(sum(vals) / len(vals),  4),
+                        "min":  round(min(vals),             4),
+                        "max":  round(max(vals),             4),
+                        "mean": round(sum(vals) / len(vals), 4),
                     }
             return out
 
+        # Collect human quality labels from approved audios (calidad_score)
+        calidad_scores = [e["calidad_score"] for e in aprobados if e.get("calidad_score")]
+        perfil_ideal = [e for e in aprobados if e.get("calidad_score") and e["calidad_score"] >= 4]
+
+        # Collect rejection reason labels
+        razones_rechazo = []
+        for e in rechazados:
+            rr = e.get("razon_rechazo")
+            if rr:
+                if isinstance(rr, str):
+                    try:
+                        rr = json.loads(rr)
+                    except Exception:
+                        rr = []
+                if isinstance(rr, list):
+                    razones_rechazo.extend(rr)
+
+        # Count label frequencies
+        from collections import Counter
+        label_counts = dict(Counter(razones_rechazo))
+
         datos = {
-            "total":                len(ejemplos),
-            "aprobados":            len(aprobados),
-            "rechazados":           len(rechazados),
-            "features_aprobados":   _stats(aprobados),
-            "features_rechazados":  _stats(rechazados),
+            "total":              len(ejemplos),
+            "aprobados":          len(aprobados),
+            "rechazados":         len(rechazados),
+            "features_aprobados": _stats(aprobados),
+            "features_rechazados": _stats(rechazados),
+            "features_perfil_ideal_4_5_estrellas": _stats(perfil_ideal) if perfil_ideal else {},
+            "calidad_score_promedio": round(sum(calidad_scores) / len(calidad_scores), 2) if calidad_scores else None,
+            "razon_rechazo_frecuencias": label_counts,
             "muestra_rechazos": [
                 {
-                    "duracion":     e.get("duracion_seg"),
-                    "tempo":        e.get("tempo_bpm"),
-                    "coincidencia": e.get("coincidencia_texto"),
-                    "params":       e.get("params_elevenlabs"),
-                    "texto":        (e.get("texto_original") or "")[:60],
+                    "duracion":           e.get("duracion_seg"),
+                    "wpm":                e.get("wpm"),
+                    "nisqa_score":        e.get("nisqa_score"),
+                    "jitter":             e.get("jitter"),
+                    "spectral_centroid":  e.get("spectral_centroid"),
+                    "coincidencia_texto": e.get("coincidencia_texto"),
+                    "razon_rechazo":      e.get("razon_rechazo"),
+                    "texto":              (e.get("texto_original") or "")[:60],
                 }
                 for e in rechazados[:12]
             ],
@@ -123,20 +150,32 @@ def _generar_resumen(user_id: int, segmento: str, n_actual: int, language_code: 
             f"Analiza estos datos de entrenamiento de un clasificador de audio de meditación.\n"
             f"El usuario ha evaluado {len(ejemplos)} fragmentos del segmento '{segmento}'.\n\n"
             f"DATOS:\n{json.dumps(datos, ensure_ascii=False)}\n\n"
+            "INSTRUCCIÓN CLAVE: Debes encontrar correlaciones entre las métricas acústicas y las "
+            "etiquetas humanas. Ejemplos de reglas a buscar:\n"
+            "- Si audios etiquetados 'voz_robotica' tienen nisqa_score < 3.0 y jitter alto → define esa regla.\n"
+            "- Si audios etiquetados 'velocidad_lenta' tienen wpm < X → establece el umbral WPM ideal.\n"
+            "- Define el 'perfil acústico ideal' analizando los audios con calidad_score de 4 y 5 estrellas.\n\n"
             "Genera un resumen destilado. Responde SOLO con este JSON sin texto adicional:\n"
             "{\n"
             f'  "segmento": "{segmento}",\n'
             f'  "version": {version},\n'
             f'  "ejemplos_procesados": {n_actual},\n'
             '  "confianza_del_resumen": <0-100>,\n'
-            '  "patrones_aprobados": {\n'
-            '    "tempo_bpm": {"min": 0, "max": 0, "optimo": 0},\n'
-            '    "energia_promedio": {"min": 0, "max": 0},\n'
-            '    "variacion_pitch": {"max": 0},\n'
-            '    "num_silencios": {"min": 0},\n'
-            '    "coincidencia_texto": {"min": 0},\n'
+            '  "perfil_acustico_ideal": {\n'
+            '    "wpm": {"min": 0, "max": 0, "optimo": 0},\n'
+            '    "nisqa_score": {"min": 0},\n'
+            '    "jitter": {"max": 0},\n'
+            '    "shimmer": {"max": 0},\n'
+            '    "spectral_centroid": {"max": 0},\n'
+            '    "densidad_silencios": {"min": 0, "max": 0},\n'
             '    "duracion_seg": {"min": 0, "max": 0}\n'
             '  },\n'
+            '  "reglas_acusticas": [\n'
+            '    {"etiqueta": "voz_robotica", "condicion": "nisqa_score < X y jitter > Y", "umbral_nisqa": 0, "umbral_jitter": 0},\n'
+            '    {"etiqueta": "velocidad_lenta", "condicion": "wpm < X", "umbral_wpm": 0},\n'
+            '    {"etiqueta": "velocidad_rapida", "condicion": "wpm > X", "umbral_wpm": 0},\n'
+            '    {"etiqueta": "mala_pronunciacion", "condicion": "coincidencia_texto < 95", "umbral_coincidencia": 95}\n'
+            '  ],\n'
             '  "causas_rechazo_frecuentes": [{"causa": "", "frecuencia_porcentaje": 0}],\n'
             '  "patrones_cualitativos": [""],\n'
             '  "params_elevenlabs_optimos": {\n'
@@ -149,7 +188,7 @@ def _generar_resumen(user_id: int, segmento: str, n_actual: int, language_code: 
 
         response = client.messages.create(
             model=_MODEL,
-            max_tokens=900,
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()

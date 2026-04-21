@@ -44,7 +44,9 @@
       "Bash(npx vite *)",
       "Bash(node_modules/.bin/vite build *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/LENOVO/Desktop/appStudioStaging/backend/routers/audiosync_router.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/LENOVO/Desktop/appStudioStaging/backend/main.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/LENOVO/Desktop/appStudioStaging/backend/main.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(cat)",
+      "Read(//tmp/**)"
     ]
   }
 }

@@ -32,6 +32,7 @@ def ensure_tables():
     try:
         conn = _get_conn()
         with conn.cursor() as cur:
+            # ── classifier_dataset ────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS classifier_dataset (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -42,15 +43,21 @@ def ensure_tables():
                     texto_transcrito TEXT,
                     coincidencia_texto FLOAT,
                     duracion_seg FLOAT,
-                    tempo_bpm FLOAT,
+                    wpm FLOAT,
+                    densidad_silencios FLOAT,
+                    duracion_promedio_silencio_seg FLOAT,
                     energia_promedio FLOAT,
                     variacion_pitch FLOAT,
-                    num_silencios INT,
-                    duracion_promedio_silencio_seg FLOAT,
+                    jitter FLOAT,
+                    shimmer FLOAT,
+                    spectral_centroid FLOAT,
+                    nisqa_score FLOAT,
                     energia_max FLOAT,
                     energia_min FLOAT,
                     params_elevenlabs JSON,
                     decision ENUM('aprobado', 'rechazado') NOT NULL,
+                    calidad_score INT,
+                    razon_rechazo JSON,
                     intento_numero INT DEFAULT 1,
                     numero_ejemplos_al_momento INT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -59,6 +66,8 @@ def ensure_tables():
                     INDEX idx_decision (decision)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+
+            # ── classifier_resumen ────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS classifier_resumen (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -74,73 +83,95 @@ def ensure_tables():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
 
-            # Migration: add language_code column to classifier_dataset if missing
-            cur.execute("""
-                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                AND TABLE_NAME = 'classifier_dataset'
-                AND COLUMN_NAME = 'language_code'
-            """)
-            if cur.fetchone()["cnt"] == 0:
-                cur.execute(
-                    "ALTER TABLE classifier_dataset "
-                    "ADD COLUMN language_code VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento"
-                )
-                cur.execute(
-                    "ALTER TABLE classifier_dataset "
-                    "ADD INDEX idx_user_segmento_lang (user_id, segmento, language_code)"
-                )
+            # ── Migrations: add missing columns ───────────────────
+            _add_column_if_missing(cur, "classifier_dataset", "language_code",
+                "VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento")
+            _add_column_if_missing(cur, "classifier_dataset", "wpm",
+                "FLOAT DEFAULT NULL AFTER coincidencia_texto")
+            _add_column_if_missing(cur, "classifier_dataset", "densidad_silencios",
+                "FLOAT DEFAULT NULL AFTER wpm")
+            _add_column_if_missing(cur, "classifier_dataset", "jitter",
+                "FLOAT DEFAULT NULL AFTER variacion_pitch")
+            _add_column_if_missing(cur, "classifier_dataset", "shimmer",
+                "FLOAT DEFAULT NULL AFTER jitter")
+            _add_column_if_missing(cur, "classifier_dataset", "spectral_centroid",
+                "FLOAT DEFAULT NULL AFTER shimmer")
+            _add_column_if_missing(cur, "classifier_dataset", "nisqa_score",
+                "FLOAT DEFAULT NULL AFTER spectral_centroid")
+            _add_column_if_missing(cur, "classifier_dataset", "calidad_score",
+                "INT DEFAULT NULL AFTER decision")
+            _add_column_if_missing(cur, "classifier_dataset", "razon_rechazo",
+                "JSON DEFAULT NULL AFTER calidad_score")
 
-            # Migration: add language_code column to classifier_resumen if missing
-            cur.execute("""
-                SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                AND TABLE_NAME = 'classifier_resumen'
-                AND COLUMN_NAME = 'language_code'
-            """)
-            if cur.fetchone()["cnt"] == 0:
-                cur.execute(
-                    "ALTER TABLE classifier_resumen "
-                    "ADD COLUMN language_code VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento"
-                )
-                try:
-                    cur.execute("ALTER TABLE classifier_resumen DROP INDEX unique_user_segmento")
-                except Exception:
-                    pass
-                cur.execute(
-                    "ALTER TABLE classifier_resumen "
-                    "ADD UNIQUE KEY unique_user_seg_lang (user_id, segmento, language_code)"
-                )
+            # add language_code index if missing
+            _add_index_if_missing(cur, "classifier_dataset", "idx_user_segmento_lang",
+                "(user_id, segmento, language_code)")
+
+            # classifier_resumen migrations
+            _add_column_if_missing(cur, "classifier_resumen", "language_code",
+                "VARCHAR(10) NOT NULL DEFAULT 'es' AFTER segmento")
+            try:
+                cur.execute("ALTER TABLE classifier_resumen DROP INDEX unique_user_segmento")
+            except Exception:
+                pass
+            _add_unique_if_missing(cur, "classifier_resumen", "unique_user_seg_lang",
+                "(user_id, segmento, language_code)")
 
         conn.close()
     except Exception as e:
         print(f"[classifier.storage] DB init warning: {e}")
 
 
+def _add_column_if_missing(cur, table: str, column: str, definition: str):
+    cur.execute("""
+        SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+    """, (table, column))
+    if cur.fetchone()["cnt"] == 0:
+        try:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        except Exception as e:
+            print(f"[classifier.storage] migration add {column} to {table}: {e}")
+
+
+def _add_index_if_missing(cur, table: str, index_name: str, columns: str):
+    cur.execute("""
+        SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s
+    """, (table, index_name))
+    if cur.fetchone()["cnt"] == 0:
+        try:
+            cur.execute(f"ALTER TABLE {table} ADD INDEX {index_name} {columns}")
+        except Exception:
+            pass
+
+
+def _add_unique_if_missing(cur, table: str, index_name: str, columns: str):
+    cur.execute("""
+        SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = %s
+    """, (table, index_name))
+    if cur.fetchone()["cnt"] == 0:
+        try:
+            cur.execute(f"ALTER TABLE {table} ADD UNIQUE KEY {index_name} {columns}")
+        except Exception:
+            pass
+
+
 def _compute_umbral(n: int) -> str:
-    if n < 30:
-        return "sin_datos"
-    elif n < 75:
-        return "aceptable"
-    elif n < 150:
-        return "bueno"
-    elif n < 300:
-        return "excelente"
-    else:
-        return "pro"
+    if n < 30:    return "sin_datos"
+    if n < 75:    return "aceptable"
+    if n < 150:   return "bueno"
+    if n < 300:   return "excelente"
+    return "pro"
 
 
 def _siguiente_umbral_info(n: int) -> dict:
-    if n < 30:
-        return {"nombre": "aceptable", "faltan": 30 - n, "total": 30}
-    elif n < 75:
-        return {"nombre": "bueno", "faltan": 75 - n, "total": 75}
-    elif n < 150:
-        return {"nombre": "excelente", "faltan": 150 - n, "total": 150}
-    elif n < 300:
-        return {"nombre": "pro", "faltan": 300 - n, "total": 300}
-    else:
-        return {"nombre": "pro", "faltan": 0, "total": 300}
+    if n < 30:    return {"nombre": "aceptable",  "faltan": 30  - n, "total": 30}
+    if n < 75:    return {"nombre": "bueno",       "faltan": 75  - n, "total": 75}
+    if n < 150:   return {"nombre": "excelente",   "faltan": 150 - n, "total": 150}
+    if n < 300:   return {"nombre": "pro",         "faltan": 300 - n, "total": 300}
+    return {"nombre": "pro", "faltan": 0, "total": 300}
 
 
 def guardar_ejemplo(
@@ -151,6 +182,8 @@ def guardar_ejemplo(
     intento: int = 1,
     params_elevenlabs: dict = None,
     language_code: str = "es",
+    calidad_score: int = None,
+    razon_rechazo: list = None,
 ) -> bool:
     """Save a training example to the dataset."""
     try:
@@ -169,11 +202,16 @@ def guardar_ejemplo(
             cur.execute(
                 """
                 INSERT INTO classifier_dataset
-                (user_id, segmento, language_code, texto_original, texto_transcrito,
-                 coincidencia_texto, duracion_seg, tempo_bpm, energia_promedio, variacion_pitch,
-                 num_silencios, duracion_promedio_silencio_seg, energia_max, energia_min,
-                 params_elevenlabs, decision, intento_numero, numero_ejemplos_al_momento)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                (user_id, segmento, language_code,
+                 texto_original, texto_transcrito, coincidencia_texto,
+                 duracion_seg, wpm, densidad_silencios, duracion_promedio_silencio_seg,
+                 energia_promedio, variacion_pitch,
+                 jitter, shimmer, spectral_centroid, nisqa_score,
+                 energia_max, energia_min,
+                 params_elevenlabs,
+                 decision, calidad_score, razon_rechazo,
+                 intento_numero, numero_ejemplos_al_momento)
+                VALUES (%s,%s,%s, %s,%s,%s, %s,%s,%s,%s, %s,%s, %s,%s,%s,%s, %s,%s, %s, %s,%s,%s, %s,%s)
                 """,
                 (
                     user_id, segmento, language_code,
@@ -181,15 +219,21 @@ def guardar_ejemplo(
                     datos_features.get("texto_transcrito"),
                     datos_features.get("coincidencia_texto"),
                     datos_features.get("duracion_seg"),
-                    datos_features.get("tempo_bpm"),
+                    datos_features.get("wpm"),
+                    datos_features.get("densidad_silencios"),
+                    datos_features.get("duracion_promedio_silencio_seg"),
                     datos_features.get("energia_promedio"),
                     datos_features.get("variacion_pitch"),
-                    datos_features.get("num_silencios"),
-                    datos_features.get("duracion_promedio_silencio_seg"),
+                    datos_features.get("jitter"),
+                    datos_features.get("shimmer"),
+                    datos_features.get("spectral_centroid"),
+                    datos_features.get("nisqa_score"),
                     datos_features.get("energia_max"),
                     datos_features.get("energia_min"),
                     json.dumps(params_elevenlabs or {}),
                     decision_norm,
+                    calidad_score,
+                    json.dumps(razon_rechazo) if razon_rechazo else None,
                     intento,
                     n_actual,
                 ),
@@ -259,9 +303,12 @@ def obtener_ejemplos_para_resumen(
             cur.execute(
                 """
                 SELECT texto_original, texto_transcrito, coincidencia_texto,
-                       duracion_seg, tempo_bpm, energia_promedio, variacion_pitch,
-                       num_silencios, duracion_promedio_silencio_seg, energia_max, energia_min,
-                       params_elevenlabs, decision, intento_numero
+                       duracion_seg, wpm, densidad_silencios,
+                       duracion_promedio_silencio_seg,
+                       energia_promedio, variacion_pitch,
+                       jitter, shimmer, spectral_centroid, nisqa_score,
+                       energia_max, energia_min,
+                       decision, calidad_score, razon_rechazo, intento_numero
                 FROM classifier_dataset
                 WHERE user_id=%s AND segmento=%s AND language_code=%s
                 ORDER BY created_at DESC
@@ -324,7 +371,7 @@ def obtener_resumen(user_id: int, segmento: str, language_code: str = "es") -> d
         if isinstance(resumen, str):
             resumen = json.loads(resumen)
         resumen["_version"] = row["version"]
-        resumen["_umbral"] = row["umbral_actual"]
+        resumen["_umbral"]  = row["umbral_actual"]
         return resumen
     except Exception:
         return None
@@ -351,9 +398,9 @@ def obtener_status_completo(user_id: int, language_code: str = "es") -> dict:
         for seg in ("intro", "meditacion", "afirmaciones"):
             n = conteos.get(seg, 0)
             resultado[seg] = {
-                "ejemplos":         n,
-                "umbral":           umbrales.get(seg, _compute_umbral(n)),
-                "version_resumen":  versiones.get(seg, 0),
+                "ejemplos":        n,
+                "umbral":          umbrales.get(seg, _compute_umbral(n)),
+                "version_resumen": versiones.get(seg, 0),
                 "siguiente_umbral": _siguiente_umbral_info(n),
             }
         return resultado
@@ -363,7 +410,7 @@ def obtener_status_completo(user_id: int, language_code: str = "es") -> dict:
 
 
 def borrar_segmento(user_id: int, segmento: str, language_code: str = "es") -> dict:
-    """Delete all training data and summary for a user/segment/language. Returns counts deleted."""
+    """Delete all training data and summary for a user/segment/language."""
     try:
         conn = _get_conn()
         with conn.cursor() as cur:

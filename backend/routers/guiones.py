@@ -334,6 +334,8 @@ class ReviewDecision(BaseModel):
     index: int
     decision: str
     new_text: Optional[str] = None
+    calidad_score: Optional[int] = None      # 1-5 stars (approved audios)
+    razon_rechazo: Optional[list] = None     # label array (rejected audios)
 
 # =============================================================
 #  LÓGICA DE AUDIO
@@ -577,6 +579,24 @@ def _clasificar_en_bg(
         segmento      = _SEG_MAP_CLS.get(section, section)
 
         def _on_features(features):
+            # Phase 1: Early discard — bad pronunciation detected by WhisperX
+            if features.get("descartar_automatico"):
+                if user_id:
+                    guardar_ejemplo(
+                        user_id, segmento, features, "rechazado",
+                        intento=1,
+                        params_elevenlabs=features.get("params_elevenlabs") or {},
+                        language_code=language_code,
+                        razon_rechazo=["mala_pronunciacion"],
+                    )
+                    verificar_y_regenerar_resumen(user_id, segmento, language_code)
+                emit_event(job_id, f"{section}_auto_rejected", {
+                    "index":   index,
+                    "section": section,
+                    "razon":   features.get("razon_descarte", "mala_pronunciacion"),
+                })
+                return
+
             if not user_id:
                 return
             umbral = obtener_umbral(user_id, segmento, language_code)
@@ -585,12 +605,14 @@ def _clasificar_en_bg(
             resultado = clasificar_audio(user_id, segmento, features, texto, language_code)
             if resultado.get("decision") is not None:
                 emit_event(job_id, f"{section}_classified", {
-                    "index":     index,
-                    "section":   section,
-                    "confianza": resultado.get("confianza"),
-                    "decision":  resultado.get("decision"),
-                    "razon":     resultado.get("razon"),
-                    "modo":      resultado.get("modo"),
+                    "index":                index,
+                    "section":              section,
+                    "confianza":            resultado.get("confianza"),
+                    "decision":             resultado.get("decision"),
+                    "razon":                resultado.get("razon_principal"),
+                    "razon_principal":      resultado.get("razon_principal"),
+                    "explicacion_detallada": resultado.get("explicacion_detallada"),
+                    "modo":                 resultado.get("modo"),
                 })
 
         cachear_features_async(
@@ -603,6 +625,7 @@ def _clasificar_en_bg(
 
 def _guardar_decision_clasificador(
     job_id: str, user_id: int, section: str, index: int, decision_str: str,
+    calidad_score: int = None, razon_rechazo: list = None,
 ):
     """
     Save a user's review decision as a classifier training example.
@@ -622,6 +645,8 @@ def _guardar_decision_clasificador(
             intento=1,
             params_elevenlabs=features.get("params_elevenlabs") or {},
             language_code=language_code,
+            calidad_score=calidad_score,
+            razon_rechazo=razon_rechazo,
         )
         verificar_y_regenerar_resumen(user_id, segmento, language_code)
     except Exception as exc:
@@ -1691,6 +1716,7 @@ def submit_review(decision: ReviewDecision, background_tasks: BackgroundTasks):
         background_tasks.add_task(
             _guardar_decision_clasificador,
             job_id, user_id, section, index, decision.decision,
+            decision.calidad_score, decision.razon_rechazo,
         )
 
     return {"ok": True}

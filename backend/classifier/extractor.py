@@ -1,10 +1,12 @@
 """
 Audio Feature Extractor for the Classifier Module.
-Uses pydub + numpy (available via the openai-whisper dependency).
+Integrates WhisperX (WPM + transcription), Librosa (jitter, shimmer, spectral_centroid),
+and NISQA (acoustic quality score). Falls back gracefully when libraries unavailable.
 All processing happens in daemon background threads — never blocks the main job.
 
-Whisper transcription is disabled by default (CPU-intensive).
-Enable with env var: CLASSIFIER_WHISPER=true
+Env vars:
+  CLASSIFIER_WHISPERX=true  — enable WhisperX transcription + WPM (CPU-intensive)
+  CLASSIFIER_NISQA=true     — enable NISQA MOS score (requires nisqa package)
 """
 import os
 import threading
@@ -26,19 +28,37 @@ except ImportError:
     PYDUB_AVAILABLE = False
 
 try:
-    import whisper as _whisper_lib
-    WHISPER_AVAILABLE = True
+    import whisperx
+    WHISPERX_AVAILABLE = True
 except ImportError:
-    WHISPER_AVAILABLE = False
+    WHISPERX_AVAILABLE = False
 
-# Enable Whisper transcription for classifier (disabled by default — CPU-intensive)
-CLASSIFIER_WHISPER = os.getenv("CLASSIFIER_WHISPER", "false").lower() == "true"
+try:
+    import librosa as _librosa_lib
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
 
-_whisper_model      = None
-_whisper_model_lock = threading.Lock()
+# NISQA — try multiple import paths used by different package versions
+NISQA_AVAILABLE = False
+_nisqa_predict_fn = None
+try:
+    from nisqa.predict import predict_file as _nisqa_predict_fn  # type: ignore
+    NISQA_AVAILABLE = True
+except (ImportError, Exception):
+    try:
+        from nisqa.predict import predict_mos as _nisqa_predict_fn  # type: ignore
+        NISQA_AVAILABLE = True
+    except (ImportError, Exception):
+        pass
+
+CLASSIFIER_WHISPERX = os.getenv("CLASSIFIER_WHISPERX", "false").lower() == "true"
+CLASSIFIER_NISQA    = os.getenv("CLASSIFIER_NISQA",    "false").lower() == "true"
+
+_whisperx_model      = None
+_whisperx_model_lock = threading.Lock()
 
 # ── Feature cache ─────────────────────────────────────────────────────────────
-# Keyed by f"{job_id}_{section}_{index}" → features dict
 _feature_cache      : dict[str, dict] = {}
 _feature_cache_lock = threading.Lock()
 
@@ -63,15 +83,17 @@ def clear_job_cache(job_id: str):
             del _feature_cache[k]
 
 
-# ── Whisper model (lazy, "base") ──────────────────────────────────────────────
+# ── WhisperX model (lazy, loaded on first use) ────────────────────────────────
 
-def _get_classifier_whisper_model():
-    global _whisper_model
-    if _whisper_model is None:
-        with _whisper_model_lock:
-            if _whisper_model is None:
-                _whisper_model = _whisper_lib.load_model("base")
-    return _whisper_model
+def _get_whisperx_model():
+    global _whisperx_model
+    if _whisperx_model is None:
+        with _whisperx_model_lock:
+            if _whisperx_model is None:
+                _whisperx_model = whisperx.load_model(
+                    "base", device="cpu", compute_type="float32"
+                )
+    return _whisperx_model
 
 
 # ── Feature extraction ────────────────────────────────────────────────────────
@@ -79,28 +101,33 @@ def _get_classifier_whisper_model():
 def extraer_features_audio(audio_seg: "AudioSegment", texto_original: str) -> dict:
     """
     Extract acoustic features from a pydub AudioSegment.
-    Returns a dict with all features defined in the spec.
-    On any failure returns safe defaults.
+    Returns a dict with all features. On any failure returns safe defaults.
     """
     defaults = {
-        "duracion_seg": 0.0,
-        "tempo_bpm": 0.0,
-        "energia_promedio": 0.0,
-        "variacion_pitch": 0.0,
-        "num_silencios": 0,
+        "duracion_seg":                   0.0,
+        "wpm":                            0.0,
+        "densidad_silencios":             0.0,
         "duracion_promedio_silencio_seg": 0.0,
-        "energia_max": 0.0,
-        "energia_min": 0.0,
-        "texto_original": texto_original,
-        "texto_transcrito": None,
-        "coincidencia_texto": None,
+        "energia_promedio":               0.0,
+        "variacion_pitch":                0.0,
+        "jitter":                         None,
+        "shimmer":                        None,
+        "spectral_centroid":              None,
+        "nisqa_score":                    None,
+        "energia_max":                    0.0,
+        "energia_min":                    0.0,
+        "texto_original":                 texto_original,
+        "texto_transcrito":               None,
+        "coincidencia_texto":             None,
+        "descartar_automatico":           False,
+        "razon_descarte":                 None,
     }
 
     if not PYDUB_AVAILABLE or not NUMPY_AVAILABLE:
         return defaults
 
     try:
-        audio_mono = audio_seg.set_channels(1)
+        audio_mono   = audio_seg.set_channels(1)
         duracion_seg = len(audio_mono) / 1000.0
 
         if duracion_seg < 0.2:
@@ -121,41 +148,69 @@ def extraer_features_audio(audio_seg: "AudioSegment", texto_original: str) -> di
         energia_max  = float(np.max(np.abs(s_norm)))
         energia_min  = float(np.min(np.abs(s_norm)))
 
-        # ── Silencios ─────────────────────────────────────────────
+        # ── Silencios → densidad (total_sil_secs / duracion) ─────
         thresh_db = audio_mono.dBFS - 14
         silencios = detect_silence(audio_mono, min_silence_len=100, silence_thresh=thresh_db)
-        num_sil   = len(silencios)
         durs_sil  = [(e - s) / 1000.0 for s, e in silencios]
-        dur_prom_sil = (sum(durs_sil) / len(durs_sil)) if durs_sil else 0.0
-
-        # ── Tempo BPM (syllabic rate) ─────────────────────────────
-        tempo_bpm = _estimate_tempo_bpm(s_norm, sr)
+        total_sil_secs     = sum(durs_sil)
+        densidad_silencios = round(total_sil_secs / duracion_seg, 4) if duracion_seg > 0 else 0.0
+        dur_prom_sil       = round(total_sil_secs / len(durs_sil), 3) if durs_sil else 0.0
 
         # ── Pitch variation (ZCR std dev) ─────────────────────────
         variacion_pitch = _estimate_pitch_variation(s_norm, sr)
 
         features = {
-            "duracion_seg":              round(duracion_seg,    3),
-            "tempo_bpm":                 round(tempo_bpm,       1),
-            "energia_promedio":          round(energia_prom,    6),
-            "variacion_pitch":           round(variacion_pitch, 3),
-            "num_silencios":             num_sil,
-            "duracion_promedio_silencio_seg": round(dur_prom_sil, 3),
-            "energia_max":               round(energia_max,     5),
-            "energia_min":               round(energia_min,     8),
-            "texto_original":            texto_original,
-            "texto_transcrito":          None,
-            "coincidencia_texto":        None,
+            "duracion_seg":                   round(duracion_seg, 3),
+            "wpm":                            0.0,
+            "densidad_silencios":             densidad_silencios,
+            "duracion_promedio_silencio_seg": dur_prom_sil,
+            "energia_promedio":               round(energia_prom, 6),
+            "variacion_pitch":                round(variacion_pitch, 3),
+            "jitter":                         None,
+            "shimmer":                        None,
+            "spectral_centroid":              None,
+            "nisqa_score":                    None,
+            "energia_max":                    round(energia_max, 5),
+            "energia_min":                    round(energia_min, 8),
+            "texto_original":                 texto_original,
+            "texto_transcrito":               None,
+            "coincidencia_texto":             None,
+            "descartar_automatico":           False,
+            "razon_descarte":                 None,
         }
 
-        # ── Transcripción (opcional, carga CPU) ───────────────────
-        if CLASSIFIER_WHISPER and WHISPER_AVAILABLE:
+        # ── Librosa micro-vocal analysis ──────────────────────────
+        if LIBROSA_AVAILABLE:
             try:
-                texto_t, coincid = _transcribir_audio(audio_mono, texto_original)
+                y_f32 = s_norm.astype(np.float32)
+                features["jitter"]            = _compute_jitter(y_f32, sr)
+                features["shimmer"]           = _compute_shimmer(y_f32, sr)
+                features["spectral_centroid"] = _compute_spectral_centroid(y_f32, sr)
+            except Exception as exc:
+                print(f"[classifier.extractor] librosa error: {exc}")
+
+        # ── WhisperX: WPM + transcription + text match ────────────
+        if CLASSIFIER_WHISPERX and WHISPERX_AVAILABLE:
+            try:
+                texto_t, coincid, wpm = _transcribir_whisperx(
+                    audio_mono, texto_original, duracion_seg
+                )
                 features["texto_transcrito"]   = texto_t
                 features["coincidencia_texto"] = coincid
-            except Exception:
-                pass
+                features["wpm"]                = wpm
+                # Early discard: < 95% text match → auto-reject
+                if coincid is not None and coincid < 95.0:
+                    features["descartar_automatico"] = True
+                    features["razon_descarte"]       = "mala_pronunciacion"
+            except Exception as exc:
+                print(f"[classifier.extractor] whisperx error: {exc}")
+
+        # ── NISQA acoustic quality score (1.0 – 5.0) ─────────────
+        if CLASSIFIER_NISQA and NISQA_AVAILABLE:
+            try:
+                features["nisqa_score"] = _compute_nisqa(audio_mono)
+            except Exception as exc:
+                print(f"[classifier.extractor] nisqa error: {exc}")
 
         return features
 
@@ -165,63 +220,110 @@ def extraer_features_audio(audio_seg: "AudioSegment", texto_original: str) -> di
         return defaults
 
 
-def _estimate_tempo_bpm(samples: "np.ndarray", sample_rate: int) -> float:
-    """Estimate speech syllabic rate as BPM using energy-envelope peak detection."""
-    frame_size = max(1, int(sample_rate * 0.008))
-    n_frames   = len(samples) // frame_size
-    if n_frames < 20:
-        return 0.0
+# ── Librosa helpers ───────────────────────────────────────────────────────────
 
-    energy = np.array([
-        float(np.sqrt(np.mean(samples[i * frame_size:(i + 1) * frame_size] ** 2) + 1e-12))
-        for i in range(n_frames)
-    ])
+def _compute_jitter(y: "np.ndarray", sr: int) -> Optional[float]:
+    """Jitter: period-to-period variation of the fundamental frequency."""
+    f0, _, _ = _librosa_lib.pyin(
+        y,
+        fmin=_librosa_lib.note_to_hz("C2"),
+        fmax=_librosa_lib.note_to_hz("C7"),
+        sr=sr,
+        fill_na=None,
+    )
+    if f0 is None:
+        return None
+    f0_voiced = f0[~np.isnan(f0)]
+    if len(f0_voiced) < 4:
+        return None
+    periods = 1.0 / f0_voiced
+    jitter  = float(np.mean(np.abs(np.diff(periods))) / (np.mean(periods) + 1e-12))
+    return round(jitter, 6)
 
-    window   = min(10, n_frames // 4)
-    smoothed = np.convolve(energy, np.ones(window) / window, mode="same")
 
-    threshold = np.mean(smoothed) * 0.5
-    peaks = [
-        i for i in range(1, len(smoothed) - 1)
-        if smoothed[i] > smoothed[i - 1]
-        and smoothed[i] > smoothed[i + 1]
-        and smoothed[i] > threshold
-    ]
+def _compute_shimmer(y: "np.ndarray", sr: int) -> Optional[float]:
+    """Shimmer: amplitude variation between consecutive analysis frames."""
+    rms = _librosa_lib.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
+    if len(rms) < 4:
+        return None
+    shimmer = float(np.mean(np.abs(np.diff(rms))) / (np.mean(rms) + 1e-12))
+    return round(shimmer, 6)
 
-    if len(peaks) < 4:
-        return 0.0
 
-    intervals = [
-        (peaks[k + 1] - peaks[k]) * frame_size / sample_rate
-        for k in range(len(peaks) - 1)
-    ]
-    valid = [iv for iv in intervals if 0.05 < iv < 0.5]
-    if len(valid) < 3:
-        return 0.0
+def _compute_spectral_centroid(y: "np.ndarray", sr: int) -> Optional[float]:
+    """Spectral centroid: weighted mean frequency — high values indicate metallic AI artifacts."""
+    sc = _librosa_lib.feature.spectral_centroid(y=y, sr=sr)
+    return round(float(np.mean(sc)), 2)
 
-    med = float(np.median(valid))
-    return min(round(60.0 / med, 1), 300.0) if med > 0 else 0.0
 
+# ── NISQA helper ──────────────────────────────────────────────────────────────
+
+def _compute_nisqa(audio_mono: "AudioSegment") -> Optional[float]:
+    """Run NISQA MOS prediction on a mono audio segment. Returns score 1.0–5.0."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp_path = f.name
+        audio_mono.export(tmp_path, format="wav")
+        score = _nisqa_predict_fn(tmp_path)
+        return round(float(score), 3)
+    except Exception:
+        return None
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+# ── WhisperX transcription ────────────────────────────────────────────────────
+
+def _transcribir_whisperx(
+    audio_mono: "AudioSegment", texto_original: str, duracion_seg: float
+) -> tuple:
+    """Transcribe with WhisperX; return (texto_transcrito, coincidencia_pct, wpm)."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp_path = f.name
+        audio_mono.export(tmp_path, format="wav")
+
+        model    = _get_whisperx_model()
+        result   = model.transcribe(tmp_path, batch_size=8)
+        segments = result.get("segments", [])
+
+        texto_t = " ".join(s.get("text", "") for s in segments).strip()
+        # Use word-level data when available, else fall back to text split
+        words   = [w for s in segments for w in s.get("words", [])]
+        n_words = len(words) if words else len(texto_t.split())
+        wpm     = round((n_words / duracion_seg) * 60, 1) if duracion_seg > 0 else 0.0
+        coincid = _token_overlap(texto_original, texto_t)
+        return texto_t, coincid, wpm
+    except Exception:
+        return None, None, 0.0
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+# ── Pitch variation (ZCR) ─────────────────────────────────────────────────────
 
 def _estimate_pitch_variation(samples: "np.ndarray", sample_rate: int) -> float:
     """Estimate pitch variation via Zero-Crossing Rate std dev across frames."""
     frame_size = max(1, int(sample_rate * 0.025))
     hop_size   = max(1, int(sample_rate * 0.010))
-
     zcrs = []
     for i in range(0, len(samples) - frame_size, hop_size):
         frame = samples[i:i + frame_size]
         zcr   = float(np.sum(np.abs(np.diff(np.sign(frame)))) / (2 * frame_size))
         zcrs.append(zcr)
-
     if len(zcrs) < 5:
         return 0.0
-
     return round(float(np.std(zcrs)) * 1000, 3)
 
 
+# ── Text similarity ───────────────────────────────────────────────────────────
+
 def _token_overlap(a: str, b: str) -> float:
-    """Simple token-overlap similarity (Jaccard) in percent."""
+    """Token-overlap (Jaccard) similarity in percent."""
     if not a or not b:
         return 0.0
     wa, wb = set(a.lower().split()), set(b.lower().split())
@@ -229,24 +331,6 @@ def _token_overlap(a: str, b: str) -> float:
         return 100.0
     union = wa | wb
     return round(len(wa & wb) / len(union) * 100, 1) if union else 0.0
-
-
-def _transcribir_audio(audio_mono: "AudioSegment", texto_original: str) -> tuple:
-    """Transcribe with Whisper 'base' and compute similarity to original text."""
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            tmp_path = f.name
-        audio_mono.export(tmp_path, format="wav")
-        model   = _get_classifier_whisper_model()
-        result  = model.transcribe(tmp_path, language=None, verbose=False, fp16=False)
-        texto_t = result.get("text", "").strip()
-        return texto_t, _token_overlap(texto_original, texto_t)
-    except Exception:
-        return None, None
-    finally:
-        if tmp_path:
-            Path(tmp_path).unlink(missing_ok=True)
 
 
 # ── Background cache task ─────────────────────────────────────────────────────
@@ -263,7 +347,7 @@ def cachear_features_async(
     """
     Load the preview WAV, extract features, cache them.
     Designed to run inside a daemon threading.Thread.
-    Calls on_done(features) when complete (optional, used to emit SSE events).
+    Calls on_done(features) when complete.
     """
     if not PYDUB_AVAILABLE:
         return
