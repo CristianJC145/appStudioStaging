@@ -1341,7 +1341,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   margin-bottom: 9px; letter-spacing: 0.10em; font-weight: 600; text-transform: uppercase;
 }
 .review-card-text {
-  font-family: var(--ff-body); font-size: 0.95rem; font-weight: 300;
+  font-family: var(--ff-body); font-size: 1.05rem; font-weight: 300;
   line-height: 1.70; color: var(--tx); margin-bottom: 14px;
 }
 .review-card-audio { margin-bottom: 14px; }
