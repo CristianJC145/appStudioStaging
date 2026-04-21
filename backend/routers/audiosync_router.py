@@ -93,33 +93,40 @@ def _run_job(job_id: str, audio_bytes: bytes, filename: str, language: str):
                     "start": round(seg["start"], 3),
                     "end":   round(seg["end"],   3),
                 })
-                
         raw_words = []
         for seg in result.get("segments", []):
             for w in seg.get("words", []):
                 if "start" in w and "end" in w:
                     raw_words.append(w)
 
-        # Format words — only include words that have both start AND end attributes
         words = []
-        TAIL_PADDING = 0.150  # 150 milisegundos extra para capturar la "s" y la respiración
+        HEAD_PADDING = 0.080  # 80 milisegundos de rescate para el inicio
+        TAIL_PADDING = 0.150  # 150 milisegundos de estela para el final
         
         for i, w in enumerate(raw_words):
-            start = w["start"]
+            base_start = w["start"]
             base_end = w["end"]
             
-            # Seguro contra colisiones: no extenderse más allá del inicio de la palabra siguiente
+            # --- Seguro contra colisiones Frontales (Head Padding) ---
+            if i > 0:
+                prev_end = raw_words[i - 1]["end"]
+                # Retrocedemos 80ms, pero NUNCA pisamos la palabra anterior
+                safe_start = max(base_start - HEAD_PADDING, prev_end)
+            else:
+                # Si es la primera palabra del audio, no podemos bajar de 0.0
+                safe_start = max(base_start - HEAD_PADDING, 0.0)
+
+            # --- Seguro contra colisiones Traseras (Tail Padding) ---
             if i < len(raw_words) - 1:
                 next_start = raw_words[i + 1]["start"]
-                # Tomamos el tiempo base + padding, pero NUNCA pisamos la siguiente palabra
+                # Avanzamos 150ms, pero NUNCA pisamos la palabra siguiente
                 safe_end = min(base_end + TAIL_PADDING, next_start)
             else:
-                # Si es la última palabra del audio, aplicamos el padding libremente
                 safe_end = base_end + TAIL_PADDING
 
             words.append({
                 "word":  w["word"],
-                "start": round(start, 3),
+                "start": round(safe_start, 3),
                 "end":   round(safe_end, 3),
             })
 

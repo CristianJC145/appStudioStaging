@@ -315,8 +315,6 @@ const IcExport = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="non
 const IcUpload = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
 const IcVol    = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
 const IcMuted  = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-const IcCursor = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3l14 9-8 1-4 7z"/></svg>
-const IcSelect = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2"/></svg>
 const IcCut    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
 const IcSilence= () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.68 10.68a2 2 0 0 0 2.63 2.63M7 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3l5 5V8.28M20.69 20.69A16.8 16.8 0 0 0 21 18v-6M15.54 8.46A5 5 0 0 1 17 12v1"/></svg>
 const IcTrim   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="6" y="4" width="12" height="16" rx="1"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
@@ -490,12 +488,14 @@ export default function AudioSyncModule() {
   const [statusMsg,    setStatusMsg]    = useState("Carga los dos archivos de audio para comenzar")
   const [stats,        setStats]        = useState(null)
   const [canvasW,      setCanvasW]      = useState(800)
-  const [editTool,     setEditTool]     = useState("cursor") // "cursor" | "select"
   const [selection,    setSelection]    = useState(null)     // { track, start, end }
   const [bufferVersion,setBufferVersion]= useState(0)
+  const [editMenuOpen, setEditMenuOpen] = useState(false)
   const selDragRef   = useRef(null)  // { track, startT, startCSS, dragging } during drag
   const selRef       = useRef(null)  // mutable mirror of selection
   const undoStackRef = useRef([])    // undo history (up to 10 levels)
+  const redoStackRef = useRef([])    // redo history (up to 10 levels)
+  const editMenuRef  = useRef(null)  // dropdown container ref
 
   // Keep mutable refs in sync
   useEffect(() => { playheadRef.current  = playhead  }, [playhead])
@@ -795,27 +795,39 @@ export default function AudioSyncModule() {
 
   const handlePlayPause = () => isPlaying ? stopPlayback() : startPlayback()
 
-  // ── Undo stack ───────────────────────────────────────────────────────────
+  // ── Undo / Redo ──────────────────────────────────────────────────────────
+  const snapshot = () => ({
+    es: esBufferRef.current ? esBufferRef.current.slice() : null,
+    en: enBufferRef.current ? enBufferRef.current.slice() : null,
+  })
+
   const pushUndo = useCallback(() => {
-    undoStackRef.current = [
-      ...undoStackRef.current.slice(-9),
-      {
-        es: esBufferRef.current ? esBufferRef.current.slice() : null,
-        en: enBufferRef.current ? enBufferRef.current.slice() : null,
-      },
-    ]
+    undoStackRef.current = [...undoStackRef.current.slice(-9), snapshot()]
+    redoStackRef.current = []  // any new edit wipes redo history
   }, [])
 
   const handleUndo = useCallback(() => {
-    const stack = undoStackRef.current
-    if (stack.length === 0) { setStatusMsg("Nada que deshacer"); return }
-    const entry = stack[stack.length - 1]
-    undoStackRef.current = stack.slice(0, -1)
+    if (undoStackRef.current.length === 0) { setStatusMsg("Nada que deshacer"); return }
+    redoStackRef.current = [...redoStackRef.current.slice(-9), snapshot()]
+    const entry = undoStackRef.current[undoStackRef.current.length - 1]
+    undoStackRef.current = undoStackRef.current.slice(0, -1)
     if (entry.es !== null) esBufferRef.current = entry.es
     if (entry.en !== null) enBufferRef.current = entry.en
     setSelection(null); selRef.current = null
     setBufferVersion(v => v + 1)
-    setStatusMsg(`Deshecho  (${stack.length - 1} en historial)`)
+    setStatusMsg("Deshecho")
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) { setStatusMsg("Nada que rehacer"); return }
+    undoStackRef.current = [...undoStackRef.current.slice(-9), snapshot()]
+    const entry = redoStackRef.current[redoStackRef.current.length - 1]
+    redoStackRef.current = redoStackRef.current.slice(0, -1)
+    if (entry.es !== null) esBufferRef.current = entry.es
+    if (entry.en !== null) enBufferRef.current = entry.en
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg("Rehecho")
   }, [])
 
   // ── Edit operations (use selRef so work from keyboard shortcuts too) ─────
@@ -902,29 +914,20 @@ export default function AudioSyncModule() {
 
   const handleCanvasMouseDown = (e, trackId) => {
     const { t, cssX } = canvasTime(e)
-    const isSelect = editTool === "select"
-    selDragRef.current = { track: trackId, startT: t, startCSS: cssX, dragging: isSelect }
-    if (isSelect) {
-      const sel = { track: trackId, start: t, end: t }
-      selRef.current = sel; setSelection(sel)
-    } else {
-      // Cursor mode: clear selection, defer seek to mouseUp (if no drag happened)
-      setSelection(null); selRef.current = null
-      renderAll()
-    }
+    setEditMenuOpen(false)
+    selDragRef.current = { track: trackId, startT: t, startCSS: cssX, dragging: false }
+    setSelection(null); selRef.current = null
+    renderAll()
   }
 
   const handleCanvasMouseMove = (e, trackId) => {
     const drag = selDragRef.current
     if (!drag || drag.track !== trackId) return
     const { t, cssX } = canvasTime(e)
-
-    // In cursor mode start selecting only after dragging 5+ CSS pixels
     if (!drag.dragging) {
       if (Math.abs(cssX - drag.startCSS) < 5) return
       drag.dragging = true
     }
-
     const sel = { track: trackId, start: Math.min(drag.startT, t), end: Math.max(drag.startT, t) }
     selRef.current = sel; setSelection(sel); renderAll()
   }
@@ -934,7 +937,6 @@ export default function AudioSyncModule() {
     selDragRef.current = null
     if (!drag) return
     if (!drag.dragging) {
-      // Simple click in cursor mode → seek playhead
       const t = drag.startT
       playheadRef.current = t; setPlayhead(t)
       if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
@@ -979,6 +981,16 @@ export default function AudioSyncModule() {
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Edit menu close on outside click ────────────────────────────────────
+  useEffect(() => {
+    const onDown = (e) => {
+      if (editMenuRef.current && !editMenuRef.current.contains(e.target))
+        setEditMenuOpen(false)
+    }
+    document.addEventListener("mousedown", onDown)
+    return () => document.removeEventListener("mousedown", onDown)
+  }, [])
+
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
@@ -988,16 +1000,15 @@ export default function AudioSyncModule() {
         if (isPlayRef.current) stopPlayback(); else startPlayback()
         return
       }
-      if (e.ctrlKey && e.key === "z") {
-        e.preventDefault(); handleUndo(); return
-      }
+      if (e.ctrlKey && e.key === "z") { e.preventDefault(); handleUndo(); return }
+      if (e.ctrlKey && e.key === "y") { e.preventDefault(); handleRedo(); return }
       if ((e.key === "Delete" || e.key === "Backspace") && selRef.current) {
         e.preventDefault(); handleCut(); return
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [startPlayback, stopPlayback, handleUndo, handleCut])
+  }, [startPlayback, stopPlayback, handleUndo, handleRedo, handleCut])
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const totalDur   = getMaxDur()
@@ -1042,19 +1053,23 @@ export default function AudioSyncModule() {
       {/* ── TOOLBAR ─────────────────────────────────────── */}
       <div className="as-toolbar">
         <div className="as-toolbar-group">
-          <button className={`as-btn${isPlaying ? " as-btn--play-active" : ""}`} onClick={handlePlayPause}>
+          <button
+            className={`as-btn as-btn--icon${isPlaying ? " as-btn--play-active" : ""}`}
+            onClick={handlePlayPause} title={isPlaying ? "Pausar (Espacio)" : "Reproducir (Espacio)"}
+          >
             {isPlaying ? <IcPause /> : <IcPlay />}
-            <span>{isPlaying ? "PAUSA" : "PLAY"}</span>
           </button>
-          <button className="as-btn" onClick={stopPlayback}><IcStop /><span>STOP</span></button>
+          <button className="as-btn as-btn--icon" onClick={stopPlayback} title="Detener y volver al inicio">
+            <IcStop />
+          </button>
         </div>
 
         <div className="as-toolbar-sep" />
 
         <div className="as-toolbar-group">
-          <button className="as-btn" onClick={handleZoomIn}><IcZoomIn /><span>ZOOM+</span></button>
-          <button className="as-btn" onClick={handleZoomOut}><IcZoomOut /><span>ZOOM-</span></button>
-          <button className="as-btn" onClick={handleFit}><IcFit /><span>FIT</span></button>
+          <button className="as-btn as-btn--icon" onClick={handleZoomIn}  title="Acercar zoom (rueda del ratón)"><IcZoomIn /></button>
+          <button className="as-btn as-btn--icon" onClick={handleZoomOut} title="Alejar zoom (rueda del ratón)"><IcZoomOut /></button>
+          <button className="as-btn as-btn--icon" onClick={handleFit}     title="Ajustar todo el audio en pantalla"><IcFit /></button>
         </div>
 
         <div className="as-toolbar-sep" />
@@ -1062,64 +1077,69 @@ export default function AudioSyncModule() {
         <div className="as-toolbar-group">
           <button
             className="as-btn as-btn--accent" onClick={handleSync} disabled={!canSync}
-            title={canSync ? "Sincronizar oraciones" : "Transcribe ambos audios primero"}
+            title={canSync ? "Sincronizar EN a los tiempos de ES" : "Transcribe ambos audios primero"}
           >
             <IcSync /><span>SINCRONIZAR</span>
           </button>
-          <button className="as-btn as-btn--export" onClick={handleExport} disabled={!canExport}>
+          <button
+            className="as-btn as-btn--export" onClick={handleExport} disabled={!canExport}
+            title="Exportar audio sincronizado como WAV 24-bit 48kHz"
+          >
             <IcExport /><span>EXPORTAR WAV</span>
           </button>
         </div>
 
         <div className="as-toolbar-sep" />
 
-        <div className="as-toolbar-group">
+        {/* ── Dropdown EDITAR ── */}
+        <div className="as-edit-menu-wrap" ref={editMenuRef}>
           <button
-            className="as-btn" onClick={handleUndo}
-            title="Deshacer última edición (Ctrl+Z)"
+            className={`as-btn${editMenuOpen ? " as-btn--active" : ""}`}
+            onClick={() => setEditMenuOpen(o => !o)}
+            title="Opciones de edición"
           >
-            <IcUndo /><span>DESHACER</span>
+            <span>EDITAR</span>
+            <svg width="8" height="8" viewBox="0 0 10 6" fill="currentColor" style={{ opacity: 0.6 }}>
+              <path d="M0 0l5 6 5-6z"/>
+            </svg>
           </button>
-        </div>
 
-        <div className="as-toolbar-sep" />
-
-        <div className="as-toolbar-group">
-          <button
-            className={`as-btn${editTool === "cursor" ? " as-btn--active" : ""}`}
-            onClick={() => { setEditTool("cursor"); setSelection(null); selRef.current = null }}
-            title="Cursor — clic mueve cabezal, arrastra selecciona"
-          >
-            <IcCursor /><span>CURSOR</span>
-          </button>
-          <button
-            className={`as-btn${editTool === "select" ? " as-btn--edit-active" : ""}`}
-            onClick={() => setEditTool("select")}
-            title="Selección — arrastra para seleccionar región"
-          >
-            <IcSelect /><span>SELEC.</span>
-          </button>
-        </div>
-
-        {selection && selection.end > selection.start && (
-          <>
-            <div className="as-toolbar-sep" />
-            <div className="as-toolbar-group">
-              <span style={{ fontSize: "0.63rem", color: "rgba(255,255,150,0.7)", paddingRight: 2, fontFamily: "monospace" }}>
-                {selection.track.toUpperCase()} {selection.start.toFixed(2)}–{selection.end.toFixed(2)}s
-              </span>
-              <button className="as-btn as-btn--danger" onClick={handleCut} title="Eliminar región seleccionada del buffer">
-                <IcCut /><span>CORTAR</span>
+          {editMenuOpen && (
+            <div className="as-edit-dropdown">
+              <button className="as-edit-item" onClick={() => { handleUndo(); setEditMenuOpen(false) }}>
+                <IcUndo /><span>Deshacer</span><kbd>Ctrl+Z</kbd>
               </button>
-              <button className="as-btn" onClick={handleSilence} title="Rellenar región con silencio">
-                <IcSilence /><span>SILENCIO</span>
+              <button className="as-edit-item" onClick={() => { handleRedo(); setEditMenuOpen(false) }}>
+                <IcUndo style={{ transform: "scaleX(-1)" }} /><span>Rehacer</span><kbd>Ctrl+Y</kbd>
               </button>
-              <button className="as-btn" onClick={handleTrimToSelection} title="Conservar solo la región seleccionada">
-                <IcTrim /><span>TRIM</span>
+              <div className="as-edit-divider" />
+              <button
+                className="as-edit-item"
+                onClick={() => { handleCut(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Elimina la región seleccionada"
+              >
+                <IcCut /><span>Cortar selección</span><kbd>Supr</kbd>
+              </button>
+              <button
+                className="as-edit-item"
+                onClick={() => { handleSilence(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Rellena la selección con silencio"
+              >
+                <IcSilence /><span>Silenciar selección</span>
+              </button>
+              <button
+                className="as-edit-item"
+                onClick={() => { handleTrimToSelection(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Conserva solo la región seleccionada"
+              >
+                <IcTrim /><span>Trim a selección</span>
               </button>
             </div>
-          </>
-        )}
+          )}
+        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -1221,7 +1241,7 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={esCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
+                style={{ cursor: "crosshair" }}
                 onMouseDown={e => handleCanvasMouseDown(e, "es")}
                 onMouseMove={e => handleCanvasMouseMove(e, "es")}
                 onMouseUp={e => handleCanvasMouseUp(e, "es")}
@@ -1260,7 +1280,7 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={enCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
+                style={{ cursor: "crosshair" }}
                 onMouseDown={e => handleCanvasMouseDown(e, "en")}
                 onMouseMove={e => handleCanvasMouseMove(e, "en")}
                 onMouseUp={e => handleCanvasMouseUp(e, "en")}
