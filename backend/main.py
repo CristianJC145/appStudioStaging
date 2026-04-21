@@ -14,6 +14,10 @@ from routers import auth
 from routers import admin
 from routers import bucles
 from routers import generador
+import torchaudio
+if not hasattr(torchaudio, 'AudioMetaData'):
+    from torchaudio.backend.common import AudioMetaData
+    torchaudio.AudioMetaData = AudioMetaData
 try:
     from routers.guiones import PYDUB_AVAILABLE
 except ImportError:

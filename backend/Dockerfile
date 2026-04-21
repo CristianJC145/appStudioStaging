@@ -4,7 +4,6 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# 1. Instalar dependencias base
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -25,12 +24,22 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 
-# 2. Instalar dependencias de Python
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. LA CIRUGÍA: Curar CTranslate2 del error "Executable Stack"
-#    patchelf reemplaza a execstack, hace exactamente lo mismo
+# Parche AudioMetaData: en torchaudio>=2.2 fue movido, pyannote lo busca en la raíz
+RUN python -c "import torchaudio; print(torchaudio.__version__)" && \
+    python -c "
+import torchaudio
+if not hasattr(torchaudio, 'AudioMetaData'):
+    from torchaudio.backend.common import AudioMetaData
+    torchaudio.AudioMetaData = AudioMetaData
+    print('Parche AudioMetaData aplicado')
+else:
+    print('AudioMetaData ya existe, no se necesita parche')
+"
+
+# Curar CTranslate2 del error Executable Stack
 RUN find /usr/local/lib/python3.11/site-packages -name "libctranslate2*.so*" \
     | xargs -I{} patchelf --clear-execstack {}
 
