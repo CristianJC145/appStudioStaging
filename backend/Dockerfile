@@ -27,18 +27,6 @@ COPY requirements.txt .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Parche AudioMetaData: en torchaudio>=2.2 fue movido, pyannote lo busca en la raíz
-RUN python -c "import torchaudio; print(torchaudio.__version__)" && \
-    python -c "
-import torchaudio
-if not hasattr(torchaudio, 'AudioMetaData'):
-    from torchaudio.backend.common import AudioMetaData
-    torchaudio.AudioMetaData = AudioMetaData
-    print('Parche AudioMetaData aplicado')
-else:
-    print('AudioMetaData ya existe, no se necesita parche')
-"
-
 # Curar CTranslate2 del error Executable Stack
 RUN find /usr/local/lib/python3.11/site-packages -name "libctranslate2*.so*" \
     | xargs -I{} patchelf --clear-execstack {}
