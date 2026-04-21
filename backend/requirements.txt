@@ -14,11 +14,12 @@ bcrypt==4.0.1
 PyMySQL==1.1.1
 openai-whisper==20250625
 
-# PyTorch ligero (CPU) se descargará gracias a la URL de arriba
+# PyTorch ligero (CPU)
 torch
 torchaudio
-# Forzar una versión estable del motor para evitar el error de Executable Stack
-ctranslate2==4.3.1
+
+# Forzar la rama 3.x de CTranslate2 que NO tiene el bug de Executable Stack
+ctranslate2==3.24.0
 whisperx
 
 # Librerías de análisis acústico
