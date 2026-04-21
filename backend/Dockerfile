@@ -1,19 +1,22 @@
 FROM python:3.11-slim
 
+# 1. CRÍTICO: Forzar a Python a enviar los logs a la consola de EasyPanel inmediatamente
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# 1. Añadimos herramientas de compilación (build-essential y python3-dev)
+# 2. CRÍTICO: Añadir libgomp1 para que CTranslate2 (WhisperX) pueda ejecutarse
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
     git \
     build-essential \
     python3-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# 2. Es CRÍTICO actualizar pip primero para que procese bien la URL de PyTorch
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
