@@ -16,31 +16,22 @@ function XAITooltip({ text }) {
 
   if (!text) return null
   return (
-    <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+    <span ref={ref} style={{ position: "relative", display: "inline-flex", alignItems: "center", flexShrink: 0 }}>
       <button
         type="button"
+        className="xai-btn"
         onClick={() => setOpen(v => !v)}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          color: "var(--text3)", fontSize: "0.72rem", padding: "0 3px",
-          lineHeight: 1, verticalAlign: "middle",
-        }}
+        aria-label="Ver explicación del agente"
         title="Ver explicación del agente"
       >
-        ℹ
+        <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-1 3.5h2v4.5H7V7.5z"/>
+        </svg>
       </button>
       {open && (
-        <span style={{
-          position: "absolute", bottom: "120%", left: "50%", transform: "translateX(-50%)",
-          background: "var(--bg3, #1e1e2e)", color: "var(--text1)",
-          border: "1px solid var(--border2)", borderRadius: "var(--radius-sm)",
-          padding: "8px 12px", fontSize: "0.75rem", lineHeight: 1.5,
-          whiteSpace: "pre-wrap", width: 260, zIndex: 999,
-          boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-          pointerEvents: "none",
-        }}>
+        <span className="xai-tooltip">
           {text}
         </span>
       )}
@@ -84,21 +75,18 @@ function ConfidenceBadge({ data }) {
 function StarRating({ value, onChange }) {
   const [hovered, setHovered] = useState(0)
   return (
-    <span style={{ display: "inline-flex", gap: 2 }}>
+    <span style={{ display: "inline-flex", gap: 1 }}>
       {[1, 2, 3, 4, 5].map(n => (
         <button
           key={n}
           type="button"
+          className="star-btn"
           onMouseEnter={() => setHovered(n)}
           onMouseLeave={() => setHovered(0)}
           onClick={() => onChange(n)}
-          style={{
-            background: "none", border: "none", cursor: "pointer", padding: "0 1px",
-            fontSize: "1.1rem", lineHeight: 1,
-            color: n <= (hovered || value) ? "#f4c430" : "var(--text3)",
-            transition: "color 0.1s",
-          }}
+          aria-label={`${n} estrella${n > 1 ? "s" : ""}`}
           title={`${n} estrella${n > 1 ? "s" : ""}`}
+          style={{ color: n <= (hovered || value) ? "#f4c430" : "var(--tx3)" }}
         >
           ★
         </button>
@@ -113,26 +101,15 @@ function StarRating({ value, onChange }) {
 function ApproveModal({ onConfirm, onCancel }) {
   const [stars, setStars] = useState(0)
   return (
-    <div style={{
-      position: "absolute", zIndex: 50, top: "100%", left: 0, right: 0,
-      background: "var(--bg2)", border: "1px solid var(--gold2)",
-      borderRadius: "var(--radius-sm)", padding: "12px 14px",
-      boxShadow: "0 4px 16px rgba(0,0,0,0.35)", marginTop: 6,
-    }}>
-      <div className="text-xs" style={{ marginBottom: 8, color: "var(--text2)" }}>
-        ¿Qué tan inmersivo es este audio?
-      </div>
+    <div className="inline-action-modal inline-action-modal--gold">
+      <div className="iam-label">¿Qué tan inmersivo es este audio?</div>
       <StarRating value={stars} onChange={setStars} />
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button
-          className="btn btn-sm btn-success"
-          onClick={() => onConfirm(stars || null)}
-        >
-          ✓ Confirmar
+      <div className="iam-actions">
+        <button className="btn btn-sm btn-success" onClick={() => onConfirm(stars || null)}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="2 8 6 12 14 4"/></svg>
+          Confirmar
         </button>
-        <button className="btn btn-sm btn-ghost" onClick={onCancel}>
-          Cancelar
-        </button>
+        <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancelar</button>
       </div>
     </div>
   )
@@ -156,42 +133,29 @@ function RejectMenu({ onConfirm, onCancel }) {
   )
 
   return (
-    <div style={{
-      position: "absolute", zIndex: 50, top: "100%", left: 0, right: 0,
-      background: "var(--bg2)", border: "1px solid var(--border2)",
-      borderRadius: "var(--radius-sm)", padding: "12px 14px",
-      boxShadow: "0 4px 16px rgba(0,0,0,0.35)", marginTop: 6,
-    }}>
-      <div className="text-xs" style={{ marginBottom: 8, color: "var(--text2)" }}>
-        ¿Por qué lo rechazas?
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+    <div className="inline-action-modal">
+      <div className="iam-label">¿Por qué lo rechazas? <span style={{ color: "var(--tx3)", fontSize: "0.68rem" }}>(opcional)</span></div>
+      <div className="reject-labels-wrap">
         {REJECT_LABELS.map(({ id, label }) => (
           <button
             key={id}
             type="button"
             onClick={() => toggle(id)}
-            className="btn btn-sm"
-            style={{
-              background: selected.includes(id) ? "var(--violet2, #7c5cbf)" : "var(--bg3)",
-              color: selected.includes(id) ? "#fff" : "var(--text2)",
-              border: `1px solid ${selected.includes(id) ? "var(--violet2)" : "var(--border2)"}`,
-            }}
+            className={`reject-label-btn${selected.includes(id) ? " active" : ""}`}
           >
             {label}
           </button>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <div className="iam-actions">
         <button
           className="btn btn-sm btn-secondary"
           onClick={() => onConfirm(selected.length > 0 ? selected : null)}
         >
-          ↺ Confirmar
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="2 12 6 8 10 12 14 4"/></svg>
+          Regenerar
         </button>
-        <button className="btn btn-sm btn-ghost" onClick={onCancel}>
-          Cancelar
-        </button>
+        <button className="btn btn-sm btn-ghost" onClick={onCancel}>Cancelar</button>
       </div>
     </div>
   )
@@ -263,12 +227,17 @@ function AudioPlayer({ src }) {
         <div ref={thumbRef} className="ap-seek-thumb" style={{ left: "0%" }} />
       </div>
       <div className="ap-controls">
-        <button type="button" className="ap-btn" onClick={() => skip(-10)}>«10</button>
-        <button type="button" className="ap-btn" onClick={() => skip(-5)}>«5</button>
-        <button type="button" className="ap-btn ap-play" onClick={toggle}>{playing ? "▐▐" : "▶"}</button>
-        <button type="button" className="ap-btn" onClick={() => skip(5)}>5»</button>
-        <button type="button" className="ap-btn" onClick={() => skip(10)}>10»</button>
-        <button type="button" className="ap-btn ap-speed" onClick={() => { const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; setSpeed(next); if (audioRef.current) audioRef.current.playbackRate = next }}>x{speed}</button>
+        <button type="button" className="ap-btn" onClick={() => skip(-10)} aria-label="Retroceder 10s">«10</button>
+        <button type="button" className="ap-btn" onClick={() => skip(-5)} aria-label="Retroceder 5s">«5</button>
+        <button type="button" className="ap-btn ap-play" onClick={toggle} aria-label={playing ? "Pausar" : "Reproducir"}>
+          {playing
+            ? <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="2" y="2" width="4" height="12" rx="1"/><rect x="10" y="2" width="4" height="12" rx="1"/></svg>
+            : <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><polygon points="3,1 15,8 3,15"/></svg>
+          }
+        </button>
+        <button type="button" className="ap-btn" onClick={() => skip(5)} aria-label="Avanzar 5s">5»</button>
+        <button type="button" className="ap-btn" onClick={() => skip(10)} aria-label="Avanzar 10s">10»</button>
+        <button type="button" className="ap-btn ap-speed" aria-label={`Velocidad ${speed}x`} onClick={() => { const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; setSpeed(next); if (audioRef.current) audioRef.current.playbackRate = next }}>×{speed}</button>
         <span className="ap-time">{fmt(current)} / {fmt(durDisp)}</span>
       </div>
     </div>
@@ -346,16 +315,22 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
     setEditing(false)
   }
 
-  return (
-    <div className={`review-card fade-up ${cardClass}`} style={{ animationDelay: `${index * 0.04}s`, position: "relative" }}>
+  const isPopupOpen = pendingOk || pendingReject
 
+  return (
+    <div
+      className={`review-card fade-up ${cardClass}`}
+      style={{ animationDelay: `${index * 0.04}s`, position: "relative", zIndex: isPopupOpen ? 10 : undefined }}
+    >
       <div className="review-card-num">
-        {label || (section === "intro" ? "SEGMENTO" : section === "medit" ? "MEDITACIÓN" : "AFIRMACIÓN")} {String(index + 1).padStart(2, "0")}
+        <span className="review-card-num-text">
+          {label || (section === "intro" ? "SEGMENTO" : section === "medit" ? "MEDITACIÓN" : "AFIRMACIÓN")} {String(index + 1).padStart(2, "0")}
+        </span>
         {decision && (
           <span className={`decision-badge ${decision}`}>
-            {decision === "ok"         && "✓ Aprobado"}
-            {decision === "regenerate" && "↺ Regenerar"}
-            {decision === "skip"       && "— Omitir"}
+            {decision === "ok"         && "Aprobado"}
+            {decision === "regenerate" && "Regenerar"}
+            {decision === "skip"       && "Omitir"}
           </span>
         )}
         <ConfidenceBadge data={classifierData} />
@@ -413,37 +388,43 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
           onClick={handleAprobarClick}
           disabled={!audioUrl}
         >
-          ✓ Aprobar
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="2 8 6 12 14 4"/></svg>
+          Aprobar
         </button>
         <button
           className={`btn btn-sm ${decision === "regenerate" ? "btn-secondary" : "btn-ghost"}`}
           onClick={handleRegenClick}
           disabled={!audioUrl}
         >
-          ↺ Regenerar
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13.5 2.5A6.5 6.5 0 1 1 7 1.5"/><polyline points="11 1 14 2.5 11 4"/></svg>
+          Regenerar
         </button>
         <button
           className={`btn btn-sm ${decision === "skip" ? "btn-danger" : "btn-ghost"}`}
           onClick={handleSkip}
         >
-          — Omitir
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="3" y1="8" x2="13" y2="8"/></svg>
+          Omitir
         </button>
         <button
           className="btn btn-sm btn-ghost"
           onClick={() => { setEditedText(text || ""); setEditing(e => !e) }}
           title="Editar texto y regenerar"
+          aria-label="Editar texto"
           style={{ marginLeft: "auto", opacity: 0.65 }}
         >
-          ✎ Editar
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11.5 2.5a2.12 2.12 0 0 1 3 3L5 15H2v-3L11.5 2.5z"/></svg>
+          Editar
         </button>
         <button
           className="btn btn-sm btn-ghost"
           onClick={handleDownload}
           disabled={!audioUrl}
           title="Descargar audio"
+          aria-label="Descargar audio"
           style={{ opacity: audioUrl ? 0.65 : 0.3 }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
             <line x1="12" y1="15" x2="12" y2="3"/>
