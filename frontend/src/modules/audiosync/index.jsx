@@ -320,6 +320,7 @@ const IcSelect = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="non
 const IcCut    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
 const IcSilence= () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.68 10.68a2 2 0 0 0 2.63 2.63M7 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3l5 5V8.28M20.69 20.69A16.8 16.8 0 0 0 21 18v-6M15.54 8.46A5 5 0 0 1 17 12v1"/></svg>
 const IcTrim   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="6" y="4" width="12" height="16" rx="1"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+const IcUndo   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 7v6h6"/><path d="M3 13C5 6 13 3 19 7a9 9 0 0 1 2 12"/></svg>
 
 function IcSpinner() {
   return (
@@ -492,8 +493,9 @@ export default function AudioSyncModule() {
   const [editTool,     setEditTool]     = useState("cursor") // "cursor" | "select"
   const [selection,    setSelection]    = useState(null)     // { track, start, end }
   const [bufferVersion,setBufferVersion]= useState(0)
-  const selDragRef = useRef(null)  // { track, startT } during drag
-  const selRef     = useRef(null)  // mutable mirror of selection
+  const selDragRef   = useRef(null)  // { track, startT, startCSS, dragging } during drag
+  const selRef       = useRef(null)  // mutable mirror of selection
+  const undoStackRef = useRef([])    // undo history (up to 10 levels)
 
   // Keep mutable refs in sync
   useEffect(() => { playheadRef.current  = playhead  }, [playhead])
@@ -793,14 +795,39 @@ export default function AudioSyncModule() {
 
   const handlePlayPause = () => isPlaying ? stopPlayback() : startPlayback()
 
-  // ── Edit operations ──────────────────────────────────────────────────────
-  const handleCut = () => {
-    if (!selection || selection.start >= selection.end) return
-    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
-    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+  // ── Undo stack ───────────────────────────────────────────────────────────
+  const pushUndo = useCallback(() => {
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-9),
+      {
+        es: esBufferRef.current ? esBufferRef.current.slice() : null,
+        en: enBufferRef.current ? enBufferRef.current.slice() : null,
+      },
+    ]
+  }, [])
+
+  const handleUndo = useCallback(() => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) { setStatusMsg("Nada que deshacer"); return }
+    const entry = stack[stack.length - 1]
+    undoStackRef.current = stack.slice(0, -1)
+    if (entry.es !== null) esBufferRef.current = entry.es
+    if (entry.en !== null) enBufferRef.current = entry.en
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Deshecho  (${stack.length - 1} en historial)`)
+  }, [])
+
+  // ── Edit operations (use selRef so work from keyboard shortcuts too) ─────
+  const handleCut = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
     if (!bufRef.current) return
-    const s0  = Math.round(selection.start * srRef.current)
-    const s1  = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    pushUndo()
+    const s0  = Math.round(sel.start * srRef.current)
+    const s1  = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
     const buf = bufRef.current
     const out = new Float32Array(buf.length - (s1 - s0))
     out.set(buf.subarray(0, s0), 0)
@@ -808,34 +835,38 @@ export default function AudioSyncModule() {
     bufRef.current = out
     setSelection(null); selRef.current = null
     setBufferVersion(v => v + 1)
-    setStatusMsg(`Cortado: ${((s1 - s0) / srRef.current).toFixed(2)}s eliminados de ${selection.track.toUpperCase()}`)
-  }
+    setStatusMsg(`Cortado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
 
-  const handleSilence = () => {
-    if (!selection || selection.start >= selection.end) return
-    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
-    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+  const handleSilence = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
     if (!bufRef.current) return
-    const s0 = Math.round(selection.start * srRef.current)
-    const s1 = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    pushUndo()
+    const s0 = Math.round(sel.start * srRef.current)
+    const s1 = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
     bufRef.current.fill(0, s0, s1)
     setSelection(null); selRef.current = null
     setBufferVersion(v => v + 1)
-    setStatusMsg(`Silenciados ${((s1 - s0) / srRef.current).toFixed(2)}s en ${selection.track.toUpperCase()}`)
-  }
+    setStatusMsg(`Silenciados ${((s1 - s0) / srRef.current).toFixed(2)}s en ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
 
-  const handleTrimToSelection = () => {
-    if (!selection || selection.start >= selection.end) return
-    const bufRef = selection.track === "es" ? esBufferRef : enBufferRef
-    const srRef  = selection.track === "es" ? esSrRef     : enSrRef
+  const handleTrimToSelection = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
     if (!bufRef.current) return
-    const s0 = Math.round(selection.start * srRef.current)
-    const s1 = Math.min(Math.round(selection.end * srRef.current), bufRef.current.length)
+    pushUndo()
+    const s0 = Math.round(sel.start * srRef.current)
+    const s1 = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
     bufRef.current = bufRef.current.slice(s0, s1)
     setSelection(null); selRef.current = null
     setBufferVersion(v => v + 1)
-    setStatusMsg(`Trim aplicado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${selection.track.toUpperCase()}`)
-  }
+    setStatusMsg(`Trim aplicado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
 
   // ── Export ───────────────────────────────────────────────────────────────
   const handleExport = () => {
@@ -860,43 +891,67 @@ export default function AudioSyncModule() {
   }
 
   // ── Canvas interactions ──────────────────────────────────────────────────
+  // Scale from CSS pixels to buffer pixels (canvas width attr may differ from CSS width)
+  const canvasTime = (e) => {
+    const rect  = e.currentTarget.getBoundingClientRect()
+    const cssX  = e.clientX - rect.left
+    const scale = e.currentTarget.width / (e.currentTarget.offsetWidth || e.currentTarget.width)
+    const bufX  = cssX * scale
+    return { t: Math.max(0, viewStart + bufX / zoom), cssX }
+  }
+
   const handleCanvasMouseDown = (e, trackId) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const t    = Math.max(0, viewStart + (e.clientX - rect.left) / zoom)
-    if (editTool === "select") {
-      selDragRef.current = { track: trackId, startT: t }
+    const { t, cssX } = canvasTime(e)
+    const isSelect = editTool === "select"
+    selDragRef.current = { track: trackId, startT: t, startCSS: cssX, dragging: isSelect }
+    if (isSelect) {
       const sel = { track: trackId, start: t, end: t }
-      selRef.current = sel
-      setSelection(sel)
+      selRef.current = sel; setSelection(sel)
     } else {
+      // Cursor mode: clear selection, defer seek to mouseUp (if no drag happened)
       setSelection(null); selRef.current = null
+      renderAll()
+    }
+  }
+
+  const handleCanvasMouseMove = (e, trackId) => {
+    const drag = selDragRef.current
+    if (!drag || drag.track !== trackId) return
+    const { t, cssX } = canvasTime(e)
+
+    // In cursor mode start selecting only after dragging 5+ CSS pixels
+    if (!drag.dragging) {
+      if (Math.abs(cssX - drag.startCSS) < 5) return
+      drag.dragging = true
+    }
+
+    const sel = { track: trackId, start: Math.min(drag.startT, t), end: Math.max(drag.startT, t) }
+    selRef.current = sel; setSelection(sel); renderAll()
+  }
+
+  const handleCanvasMouseUp = (e, trackId) => {
+    const drag = selDragRef.current
+    selDragRef.current = null
+    if (!drag) return
+    if (!drag.dragging) {
+      // Simple click in cursor mode → seek playhead
+      const t = drag.startT
       playheadRef.current = t; setPlayhead(t)
       if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
       else renderAll()
     }
   }
 
-  const handleCanvasMouseMove = (e, trackId) => {
-    if (!selDragRef.current || selDragRef.current.track !== trackId) return
-    const rect   = e.currentTarget.getBoundingClientRect()
-    const t      = Math.max(0, viewStart + (e.clientX - rect.left) / zoom)
-    const startT = selDragRef.current.startT
-    const sel    = { track: trackId, start: Math.min(startT, t), end: Math.max(startT, t) }
-    selRef.current = sel
-    setSelection(sel)
-    renderAll()
-  }
-
-  const handleCanvasMouseUp = () => { selDragRef.current = null }
-
   const handleWheel = useCallback((e) => {
     e.preventDefault()
-    const rect      = e.currentTarget.getBoundingClientRect()
-    const xRel      = e.clientX - rect.left
-    const tAtCursor = viewStartRef.current + xRel / zoomRef.current
+    const rect  = e.currentTarget.getBoundingClientRect()
+    const cssX  = e.clientX - rect.left
+    const scale = e.currentTarget.width / (e.currentTarget.offsetWidth || e.currentTarget.width)
+    const bufX  = cssX * scale
+    const tAtCursor = viewStartRef.current + bufX / zoomRef.current
     const factor    = e.deltaY < 0 ? 1.22 : 1 / 1.22
     const nz        = Math.max(4, Math.min(3000, zoomRef.current * factor))
-    const nv        = Math.max(0, tAtCursor - xRel / nz)
+    const nv        = Math.max(0, tAtCursor - bufX / nz)
     zoomRef.current = nz; viewStartRef.current = nv
     setZoom(nz); setViewStart(nv)
   }, [])
@@ -918,25 +973,31 @@ export default function AudioSyncModule() {
   }
   useEffect(() => {
     const onMove = (e) => { if (scrollDrag.current) moveScroll(e.clientX) }
-    const onUp   = ()  => { scrollDrag.current = false }
+    const onUp   = ()  => { scrollDrag.current = false; selDragRef.current = null }
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup",   onUp)
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Spacebar play/pause ──────────────────────────────────────────────────
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return
       if (e.code === "Space") {
         e.preventDefault()
-        if (isPlayRef.current) stopPlayback()
-        else startPlayback()
+        if (isPlayRef.current) stopPlayback(); else startPlayback()
+        return
+      }
+      if (e.ctrlKey && e.key === "z") {
+        e.preventDefault(); handleUndo(); return
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selRef.current) {
+        e.preventDefault(); handleCut(); return
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [startPlayback, stopPlayback])
+  }, [startPlayback, stopPlayback, handleUndo, handleCut])
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const totalDur   = getMaxDur()
@@ -1014,16 +1075,27 @@ export default function AudioSyncModule() {
 
         <div className="as-toolbar-group">
           <button
+            className="as-btn" onClick={handleUndo}
+            title="Deshacer última edición (Ctrl+Z)"
+          >
+            <IcUndo /><span>DESHACER</span>
+          </button>
+        </div>
+
+        <div className="as-toolbar-sep" />
+
+        <div className="as-toolbar-group">
+          <button
             className={`as-btn${editTool === "cursor" ? " as-btn--active" : ""}`}
             onClick={() => { setEditTool("cursor"); setSelection(null); selRef.current = null }}
-            title="Cursor — clic para mover cabezal (C)"
+            title="Cursor — clic mueve cabezal, arrastra selecciona"
           >
             <IcCursor /><span>CURSOR</span>
           </button>
           <button
             className={`as-btn${editTool === "select" ? " as-btn--edit-active" : ""}`}
             onClick={() => setEditTool("select")}
-            title="Selección — arrastra para seleccionar región (S)"
+            title="Selección — arrastra para seleccionar región"
           >
             <IcSelect /><span>SELEC.</span>
           </button>
@@ -1152,7 +1224,7 @@ export default function AudioSyncModule() {
                 style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
                 onMouseDown={e => handleCanvasMouseDown(e, "es")}
                 onMouseMove={e => handleCanvasMouseMove(e, "es")}
-                onMouseUp={handleCanvasMouseUp}
+                onMouseUp={e => handleCanvasMouseUp(e, "es")}
                 onWheel={handleWheel}
               />
             </div>
@@ -1191,7 +1263,7 @@ export default function AudioSyncModule() {
                 style={{ cursor: editTool === "select" ? "crosshair" : "pointer" }}
                 onMouseDown={e => handleCanvasMouseDown(e, "en")}
                 onMouseMove={e => handleCanvasMouseMove(e, "en")}
-                onMouseUp={handleCanvasMouseUp}
+                onMouseUp={e => handleCanvasMouseUp(e, "en")}
                 onWheel={handleWheel}
               />
             </div>
