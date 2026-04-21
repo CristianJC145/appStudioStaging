@@ -197,7 +197,7 @@ function renderRuler(canvas, zoom, viewStart) {
   ctx.beginPath(); ctx.moveTo(0, H - 0.5); ctx.lineTo(W, H - 0.5); ctx.stroke()
 }
 
-function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, playhead, color, emptyMsg) {
+function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, playhead, color, emptyMsg, selection) {
   const ctx = canvas.getContext("2d")
   const W = canvas.width, H = canvas.height
   ctx.fillStyle = "#07090f"
@@ -272,6 +272,21 @@ function renderTrack(canvas, buffer, sampleRate, sentences, zoom, viewStart, pla
     ctx.setLineDash([])
   }
 
+  // Selection overlay
+  if (selection && selection.end > selection.start) {
+    const xA = (selection.start - viewStart) * zoom
+    const xB = (selection.end   - viewStart) * zoom
+    if (xB > 0 && xA < W) {
+      const dA = Math.max(0, xA), dB = Math.min(W, xB)
+      ctx.fillStyle = "rgba(255,255,150,0.15)"
+      ctx.fillRect(dA, 0, dB - dA, H)
+      ctx.strokeStyle = "rgba(255,255,120,0.75)"
+      ctx.lineWidth = 1; ctx.setLineDash([])
+      if (xA >= 0 && xA <= W) { ctx.beginPath(); ctx.moveTo(xA, 0); ctx.lineTo(xA, H); ctx.stroke() }
+      if (xB >= 0 && xB <= W) { ctx.beginPath(); ctx.moveTo(xB, 0); ctx.lineTo(xB, H); ctx.stroke() }
+    }
+  }
+
   // Playhead
   const visEnd = viewStart + W / zoom
   if (playhead >= viewStart && playhead <= visEnd) {
@@ -300,6 +315,10 @@ const IcExport = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="non
 const IcUpload = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
 const IcVol    = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
 const IcMuted  = () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+const IcCut    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12"/></svg>
+const IcSilence= () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.68 10.68a2 2 0 0 0 2.63 2.63M7 7H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3l5 5V8.28M20.69 20.69A16.8 16.8 0 0 0 21 18v-6M15.54 8.46A5 5 0 0 1 17 12v1"/></svg>
+const IcTrim   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="6" y="4" width="12" height="16" rx="1"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>
+const IcUndo   = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 7v6h6"/><path d="M3 13C5 6 13 3 19 7a9 9 0 0 1 2 12"/></svg>
 
 function IcSpinner() {
   return (
@@ -469,6 +488,14 @@ export default function AudioSyncModule() {
   const [statusMsg,    setStatusMsg]    = useState("Carga los dos archivos de audio para comenzar")
   const [stats,        setStats]        = useState(null)
   const [canvasW,      setCanvasW]      = useState(800)
+  const [selection,    setSelection]    = useState(null)     // { track, start, end }
+  const [bufferVersion,setBufferVersion]= useState(0)
+  const [editMenuOpen, setEditMenuOpen] = useState(false)
+  const selDragRef   = useRef(null)  // { track, startT, startCSS, dragging } during drag
+  const selRef       = useRef(null)  // mutable mirror of selection
+  const undoStackRef = useRef([])    // undo history (up to 10 levels)
+  const redoStackRef = useRef([])    // redo history (up to 10 levels)
+  const editMenuRef  = useRef(null)  // dropdown container ref
 
   // Keep mutable refs in sync
   useEffect(() => { playheadRef.current  = playhead  }, [playhead])
@@ -480,6 +507,7 @@ export default function AudioSyncModule() {
   useEffect(() => { transENRef.current   = transEN   }, [transEN])
   useEffect(() => { esMutedRef.current   = esMuted   }, [esMuted])
   useEffect(() => { enMutedRef.current   = enMuted   }, [enMuted])
+  useEffect(() => { selRef.current       = selection }, [selection])
 
   // ── Live mute control (no need to restart playback) ──────────────────────
   useEffect(() => {
@@ -526,7 +554,8 @@ export default function AudioSyncModule() {
         esCanvasRef.current,
         esBufferRef.current, esSrRef.current,
         transESRef.current.sentences,
-        z, vs, ph, COLOR_ES, "Carga audio ES →"
+        z, vs, ph, COLOR_ES, "Carga audio ES →",
+        selRef.current?.track === "es" ? selRef.current : null
       )
     }
 
@@ -540,12 +569,13 @@ export default function AudioSyncModule() {
         sents,
         z, vs, ph,
         isSync ? COLOR_SY : COLOR_EN,
-        "Carga audio EN →"
+        "Carga audio EN →",
+        selRef.current?.track === "en" ? selRef.current : null
       )
     }
   }, [])
 
-  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, active, renderAll])
+  useEffect(() => { renderAll() }, [canvasW, zoom, viewStart, transES, transEN, active, bufferVersion, selection, renderAll])
 
   // ── Audio decode helper ──────────────────────────────────────────────────
   const decodeFile = async (file) => {
@@ -765,6 +795,91 @@ export default function AudioSyncModule() {
 
   const handlePlayPause = () => isPlaying ? stopPlayback() : startPlayback()
 
+  // ── Undo / Redo ──────────────────────────────────────────────────────────
+  const snapshot = () => ({
+    es: esBufferRef.current ? esBufferRef.current.slice() : null,
+    en: enBufferRef.current ? enBufferRef.current.slice() : null,
+  })
+
+  const pushUndo = useCallback(() => {
+    undoStackRef.current = [...undoStackRef.current.slice(-9), snapshot()]
+    redoStackRef.current = []  // any new edit wipes redo history
+  }, [])
+
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) { setStatusMsg("Nada que deshacer"); return }
+    redoStackRef.current = [...redoStackRef.current.slice(-9), snapshot()]
+    const entry = undoStackRef.current[undoStackRef.current.length - 1]
+    undoStackRef.current = undoStackRef.current.slice(0, -1)
+    if (entry.es !== null) esBufferRef.current = entry.es
+    if (entry.en !== null) enBufferRef.current = entry.en
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg("Deshecho")
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) { setStatusMsg("Nada que rehacer"); return }
+    undoStackRef.current = [...undoStackRef.current.slice(-9), snapshot()]
+    const entry = redoStackRef.current[redoStackRef.current.length - 1]
+    redoStackRef.current = redoStackRef.current.slice(0, -1)
+    if (entry.es !== null) esBufferRef.current = entry.es
+    if (entry.en !== null) enBufferRef.current = entry.en
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg("Rehecho")
+  }, [])
+
+  // ── Edit operations (use selRef so work from keyboard shortcuts too) ─────
+  const handleCut = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    pushUndo()
+    const s0  = Math.round(sel.start * srRef.current)
+    const s1  = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
+    const buf = bufRef.current
+    const out = new Float32Array(buf.length - (s1 - s0))
+    out.set(buf.subarray(0, s0), 0)
+    out.set(buf.subarray(s1), s0)
+    bufRef.current = out
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Cortado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
+
+  const handleSilence = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    pushUndo()
+    const s0 = Math.round(sel.start * srRef.current)
+    const s1 = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
+    bufRef.current.fill(0, s0, s1)
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Silenciados ${((s1 - s0) / srRef.current).toFixed(2)}s en ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
+
+  const handleTrimToSelection = useCallback(() => {
+    const sel = selRef.current
+    if (!sel || sel.start >= sel.end) return
+    const bufRef = sel.track === "es" ? esBufferRef : enBufferRef
+    const srRef  = sel.track === "es" ? esSrRef     : enSrRef
+    if (!bufRef.current) return
+    pushUndo()
+    const s0 = Math.round(sel.start * srRef.current)
+    const s1 = Math.min(Math.round(sel.end * srRef.current), bufRef.current.length)
+    bufRef.current = bufRef.current.slice(s0, s1)
+    setSelection(null); selRef.current = null
+    setBufferVersion(v => v + 1)
+    setStatusMsg(`Trim aplicado: ${((s1 - s0) / srRef.current).toFixed(2)}s de ${sel.track.toUpperCase()}`)
+  }, [pushUndo])
+
   // ── Export ───────────────────────────────────────────────────────────────
   const handleExport = () => {
     if (!syncedBufferRef.current) { setStatusMsg("Sincroniza primero"); return }
@@ -788,22 +903,57 @@ export default function AudioSyncModule() {
   }
 
   // ── Canvas interactions ──────────────────────────────────────────────────
-  const handleCanvasClick = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const t    = Math.max(0, viewStart + (e.clientX - rect.left) / zoom)
-    playheadRef.current = t; setPlayhead(t)
-    if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
-    else renderAll()
+  // Scale from CSS pixels to buffer pixels (canvas width attr may differ from CSS width)
+  const canvasTime = (e) => {
+    const rect  = e.currentTarget.getBoundingClientRect()
+    const cssX  = e.clientX - rect.left
+    const scale = e.currentTarget.width / (e.currentTarget.offsetWidth || e.currentTarget.width)
+    const bufX  = cssX * scale
+    return { t: Math.max(0, viewStart + bufX / zoom), cssX }
+  }
+
+  const handleCanvasMouseDown = (e, trackId) => {
+    const { t, cssX } = canvasTime(e)
+    setEditMenuOpen(false)
+    selDragRef.current = { track: trackId, startT: t, startCSS: cssX, dragging: false }
+    setSelection(null); selRef.current = null
+    renderAll()
+  }
+
+  const handleCanvasMouseMove = (e, trackId) => {
+    const drag = selDragRef.current
+    if (!drag || drag.track !== trackId) return
+    const { t, cssX } = canvasTime(e)
+    if (!drag.dragging) {
+      if (Math.abs(cssX - drag.startCSS) < 5) return
+      drag.dragging = true
+    }
+    const sel = { track: trackId, start: Math.min(drag.startT, t), end: Math.max(drag.startT, t) }
+    selRef.current = sel; setSelection(sel); renderAll()
+  }
+
+  const handleCanvasMouseUp = (e, trackId) => {
+    const drag = selDragRef.current
+    selDragRef.current = null
+    if (!drag) return
+    if (!drag.dragging) {
+      const t = drag.startT
+      playheadRef.current = t; setPlayhead(t)
+      if (isPlaying) { stopPlayback(); startPosRef.current = t; setTimeout(startPlayback, 30) }
+      else renderAll()
+    }
   }
 
   const handleWheel = useCallback((e) => {
     e.preventDefault()
-    const rect      = e.currentTarget.getBoundingClientRect()
-    const xRel      = e.clientX - rect.left
-    const tAtCursor = viewStartRef.current + xRel / zoomRef.current
+    const rect  = e.currentTarget.getBoundingClientRect()
+    const cssX  = e.clientX - rect.left
+    const scale = e.currentTarget.width / (e.currentTarget.offsetWidth || e.currentTarget.width)
+    const bufX  = cssX * scale
+    const tAtCursor = viewStartRef.current + bufX / zoomRef.current
     const factor    = e.deltaY < 0 ? 1.22 : 1 / 1.22
     const nz        = Math.max(4, Math.min(3000, zoomRef.current * factor))
-    const nv        = Math.max(0, tAtCursor - xRel / nz)
+    const nv        = Math.max(0, tAtCursor - bufX / nz)
     zoomRef.current = nz; viewStartRef.current = nv
     setZoom(nz); setViewStart(nv)
   }, [])
@@ -825,11 +975,40 @@ export default function AudioSyncModule() {
   }
   useEffect(() => {
     const onMove = (e) => { if (scrollDrag.current) moveScroll(e.clientX) }
-    const onUp   = ()  => { scrollDrag.current = false }
+    const onUp   = ()  => { scrollDrag.current = false; selDragRef.current = null }
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup",   onUp)
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp) }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Edit menu close on outside click ────────────────────────────────────
+  useEffect(() => {
+    const onDown = (e) => {
+      if (editMenuRef.current && !editMenuRef.current.contains(e.target))
+        setEditMenuOpen(false)
+    }
+    document.addEventListener("mousedown", onDown)
+    return () => document.removeEventListener("mousedown", onDown)
+  }, [])
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return
+      if (e.code === "Space") {
+        e.preventDefault()
+        if (isPlayRef.current) stopPlayback(); else startPlayback()
+        return
+      }
+      if (e.ctrlKey && e.key === "z") { e.preventDefault(); handleUndo(); return }
+      if (e.ctrlKey && e.key === "y") { e.preventDefault(); handleRedo(); return }
+      if ((e.key === "Delete" || e.key === "Backspace") && selRef.current) {
+        e.preventDefault(); handleCut(); return
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [startPlayback, stopPlayback, handleUndo, handleRedo, handleCut])
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const totalDur   = getMaxDur()
@@ -874,19 +1053,23 @@ export default function AudioSyncModule() {
       {/* ── TOOLBAR ─────────────────────────────────────── */}
       <div className="as-toolbar">
         <div className="as-toolbar-group">
-          <button className={`as-btn${isPlaying ? " as-btn--play-active" : ""}`} onClick={handlePlayPause}>
+          <button
+            className={`as-btn as-btn--icon${isPlaying ? " as-btn--play-active" : ""}`}
+            onClick={handlePlayPause} title={isPlaying ? "Pausar (Espacio)" : "Reproducir (Espacio)"}
+          >
             {isPlaying ? <IcPause /> : <IcPlay />}
-            <span>{isPlaying ? "PAUSA" : "PLAY"}</span>
           </button>
-          <button className="as-btn" onClick={stopPlayback}><IcStop /><span>STOP</span></button>
+          <button className="as-btn as-btn--icon" onClick={stopPlayback} title="Detener y volver al inicio">
+            <IcStop />
+          </button>
         </div>
 
         <div className="as-toolbar-sep" />
 
         <div className="as-toolbar-group">
-          <button className="as-btn" onClick={handleZoomIn}><IcZoomIn /><span>ZOOM+</span></button>
-          <button className="as-btn" onClick={handleZoomOut}><IcZoomOut /><span>ZOOM-</span></button>
-          <button className="as-btn" onClick={handleFit}><IcFit /><span>FIT</span></button>
+          <button className="as-btn as-btn--icon" onClick={handleZoomIn}  title="Acercar zoom (rueda del ratón)"><IcZoomIn /></button>
+          <button className="as-btn as-btn--icon" onClick={handleZoomOut} title="Alejar zoom (rueda del ratón)"><IcZoomOut /></button>
+          <button className="as-btn as-btn--icon" onClick={handleFit}     title="Ajustar todo el audio en pantalla"><IcFit /></button>
         </div>
 
         <div className="as-toolbar-sep" />
@@ -894,13 +1077,68 @@ export default function AudioSyncModule() {
         <div className="as-toolbar-group">
           <button
             className="as-btn as-btn--accent" onClick={handleSync} disabled={!canSync}
-            title={canSync ? "Sincronizar oraciones" : "Transcribe ambos audios primero"}
+            title={canSync ? "Sincronizar EN a los tiempos de ES" : "Transcribe ambos audios primero"}
           >
             <IcSync /><span>SINCRONIZAR</span>
           </button>
-          <button className="as-btn as-btn--export" onClick={handleExport} disabled={!canExport}>
+          <button
+            className="as-btn as-btn--export" onClick={handleExport} disabled={!canExport}
+            title="Exportar audio sincronizado como WAV 24-bit 48kHz"
+          >
             <IcExport /><span>EXPORTAR WAV</span>
           </button>
+        </div>
+
+        <div className="as-toolbar-sep" />
+
+        {/* ── Dropdown EDITAR ── */}
+        <div className="as-edit-menu-wrap" ref={editMenuRef}>
+          <button
+            className={`as-btn${editMenuOpen ? " as-btn--active" : ""}`}
+            onClick={() => setEditMenuOpen(o => !o)}
+            title="Opciones de edición"
+          >
+            <span>EDITAR</span>
+            <svg width="8" height="8" viewBox="0 0 10 6" fill="currentColor" style={{ opacity: 0.6 }}>
+              <path d="M0 0l5 6 5-6z"/>
+            </svg>
+          </button>
+
+          {editMenuOpen && (
+            <div className="as-edit-dropdown">
+              <button className="as-edit-item" onClick={() => { handleUndo(); setEditMenuOpen(false) }}>
+                <IcUndo /><span>Deshacer</span><kbd>Ctrl+Z</kbd>
+              </button>
+              <button className="as-edit-item" onClick={() => { handleRedo(); setEditMenuOpen(false) }}>
+                <IcUndo style={{ transform: "scaleX(-1)" }} /><span>Rehacer</span><kbd>Ctrl+Y</kbd>
+              </button>
+              <div className="as-edit-divider" />
+              <button
+                className="as-edit-item"
+                onClick={() => { handleCut(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Elimina la región seleccionada"
+              >
+                <IcCut /><span>Cortar selección</span><kbd>Supr</kbd>
+              </button>
+              <button
+                className="as-edit-item"
+                onClick={() => { handleSilence(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Rellena la selección con silencio"
+              >
+                <IcSilence /><span>Silenciar selección</span>
+              </button>
+              <button
+                className="as-edit-item"
+                onClick={() => { handleTrimToSelection(); setEditMenuOpen(false) }}
+                disabled={!selection || selection.end <= selection.start}
+                title="Conserva solo la región seleccionada"
+              >
+                <IcTrim /><span>Trim a selección</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1 }} />
@@ -1003,7 +1241,11 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={esCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                onClick={handleCanvasClick} onWheel={handleWheel}
+                style={{ cursor: "crosshair" }}
+                onMouseDown={e => handleCanvasMouseDown(e, "es")}
+                onMouseMove={e => handleCanvasMouseMove(e, "es")}
+                onMouseUp={e => handleCanvasMouseUp(e, "es")}
+                onWheel={handleWheel}
               />
             </div>
 
@@ -1038,7 +1280,11 @@ export default function AudioSyncModule() {
               </div>
               <canvas
                 ref={enCanvasRef} className="as-track-canvas" width={canvasW} height={TRACK_H}
-                onClick={handleCanvasClick} onWheel={handleWheel}
+                style={{ cursor: "crosshair" }}
+                onMouseDown={e => handleCanvasMouseDown(e, "en")}
+                onMouseMove={e => handleCanvasMouseMove(e, "en")}
+                onMouseUp={e => handleCanvasMouseUp(e, "en")}
+                onWheel={handleWheel}
               />
             </div>
 

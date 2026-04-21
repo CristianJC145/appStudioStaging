@@ -1341,7 +1341,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   margin-bottom: 9px; letter-spacing: 0.10em; font-weight: 600; text-transform: uppercase;
 }
 .review-card-text {
-  font-family: var(--ff-title); font-size: 0.95rem; font-weight: 300;
+  font-family: var(--ff-body); font-size: 1.05rem; font-weight: 300;
   line-height: 1.70; color: var(--tx); margin-bottom: 14px;
 }
 .review-card-audio { margin-bottom: 14px; }
@@ -3220,6 +3220,56 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+}
+
+/* ── Edit dropdown ── */
+.as-edit-menu-wrap {
+  position: relative;
+}
+.as-edit-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  background: #141720;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.as-edit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.75);
+  font-size: 0.75rem;
+  font-family: var(--ff-body);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+.as-edit-item:hover:not(:disabled) { background: rgba(255,255,255,0.07); color: #fff; }
+.as-edit-item:disabled { opacity: 0.3; cursor: not-allowed; }
+.as-edit-item span { flex: 1; }
+.as-edit-item kbd {
+  font-size: 0.62rem;
+  color: rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: var(--ff-mono, monospace);
+  flex-shrink: 0;
+}
+.as-edit-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 3px 4px;
 }
 
 /* ── Sidebar title ── */
