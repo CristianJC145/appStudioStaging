@@ -14,22 +14,24 @@ bcrypt==4.0.1
 PyMySQL==1.1.1
 openai-whisper==20250625
 
-# PyTorch ligero (CPU) - versiones fijas para compatibilidad con pyannote.audio
+# PyTorch ligero (CPU)
 torch==2.1.0+cpu
 torchaudio==2.1.0+cpu
 
-# Fijar av ANTES de whisperx para evitar el crash de compilación con Cython 3.x
+# Fijar av ANTES de whisperx
 av==12.3.0
 
-# pyannote.audio compatible con torchaudio 2.1.x
-pyannote.audio==3.1.1
+# pyannote.audio que requiere whisperx moderno
+pyannote.audio==3.3.2
 
-# Usar la última versión de WhisperX
-whisperx
+# whisperx fijado a versión compatible con pyannote 3.3.2
+whisperx==3.3.1
+
+# numpy compatible con whisperx 3.3.x (requiere >=2.0.2, <2.1.0)
+numpy>=2.0.2,<2.1.0
 
 # Librerías de análisis acústico
 librosa>=0.10.0
-numpy<2.0.0
 
 # LLMs y APIs
 anthropic>=0.30.0
