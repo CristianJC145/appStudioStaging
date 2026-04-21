@@ -4,6 +4,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Añadimos pkg-config y las cabeceras de desarrollo de FFmpeg para compilar PyAV
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -11,6 +12,14 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
     libgomp1 \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
