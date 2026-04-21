@@ -93,17 +93,35 @@ def _run_job(job_id: str, audio_bytes: bytes, filename: str, language: str):
                     "start": round(seg["start"], 3),
                     "end":   round(seg["end"],   3),
                 })
-
-        # Format words — only include words that have both start AND end attributes
-        words = []
+                
+        raw_words = []
         for seg in result.get("segments", []):
             for w in seg.get("words", []):
                 if "start" in w and "end" in w:
-                    words.append({
-                        "word":  w["word"],
-                        "start": round(w["start"], 3),
-                        "end":   round(w["end"],   3),
-                    })
+                    raw_words.append(w)
+
+        # Format words — only include words that have both start AND end attributes
+        words = []
+        TAIL_PADDING = 0.150  # 150 milisegundos extra para capturar la "s" y la respiración
+        
+        for i, w in enumerate(raw_words):
+            start = w["start"]
+            base_end = w["end"]
+            
+            # Seguro contra colisiones: no extenderse más allá del inicio de la palabra siguiente
+            if i < len(raw_words) - 1:
+                next_start = raw_words[i + 1]["start"]
+                # Tomamos el tiempo base + padding, pero NUNCA pisamos la siguiente palabra
+                safe_end = min(base_end + TAIL_PADDING, next_start)
+            else:
+                # Si es la última palabra del audio, aplicamos el padding libremente
+                safe_end = base_end + TAIL_PADDING
+
+            words.append({
+                "word":  w["word"],
+                "start": round(start, 3),
+                "end":   round(safe_end, 3),
+            })
 
         with _jobs_lock:
             _jobs[job_id].update({
@@ -114,6 +132,7 @@ def _run_job(job_id: str, audio_bytes: bytes, filename: str, language: str):
                     "words":     words,
                 },
             })
+            
 
     except Exception as exc:
         with _jobs_lock:
