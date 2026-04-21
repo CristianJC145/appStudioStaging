@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 setuptools>=70.0.0
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
@@ -12,13 +14,23 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyMySQL==1.1.1
 openai-whisper==20250625
-# WhisperX (forced alignment). Install PyTorch CPU-only FIRST:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# PyTorch ligero (CPU) se descargará gracias a la URL de arriba
+torch
+torchaudio
 whisperx
+
+# Librerías de análisis acústico
+librosa>=0.10.0
+numpy<2.0.0
+
+# LLMs y APIs
 anthropic>=0.30.0
 google-api-python-client>=2.100.0
 youtube-transcript-api>=0.6.0
 yt-dlp>=2024.1.0
+
+# Procesamiento de documentos
 python-docx>=1.1.0
 openpyxl>=3.1.0
 pdfplumber>=0.10.0

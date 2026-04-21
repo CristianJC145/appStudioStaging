@@ -6,12 +6,13 @@ services:
     volumes:
       # Calibraciones de voz y configuraciones de usuarios
       - medi_data:/app/data
-      # Modelo de Whisper (~244 MB) — evita re-descarga en cada redeploy
-      - whisper_cache:/root/.cache/whisper
+      # Caché unificada para modelos de WhisperX, PyTorch y HuggingFace
+      # Evita la descarga masiva en cada redeploy
+      - ai_models_cache:/root/.cache
     restart: unless-stopped
 
 volumes:
   medi_data:
     driver: local
-  whisper_cache:
+  ai_models_cache:
     driver: local

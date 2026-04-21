@@ -13,7 +13,7 @@ import threading
 import tempfile
 from pathlib import Path
 from typing import Optional, Callable
-
+import string
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -323,15 +323,21 @@ def _estimate_pitch_variation(samples: "np.ndarray", sample_rate: int) -> float:
 # ── Text similarity ───────────────────────────────────────────────────────────
 
 def _token_overlap(a: str, b: str) -> float:
-    """Token-overlap (Jaccard) similarity in percent."""
+    """Token-overlap (Jaccard) similarity in percent, ignoring punctuation."""
     if not a or not b:
         return 0.0
-    wa, wb = set(a.lower().split()), set(b.lower().split())
+        
+    # Eliminar signos de puntuación y pasar a minúsculas
+    a_clean = a.translate(str.maketrans('', '', string.punctuation)).lower()
+    b_clean = b.translate(str.maketrans('', '', string.punctuation)).lower()
+    
+    wa, wb = set(a_clean.split()), set(b_clean.split())
+    
     if not wa and not wb:
         return 100.0
+        
     union = wa | wb
     return round(len(wa & wb) / len(union) * 100, 1) if union else 0.0
-
 
 # ── Background cache task ─────────────────────────────────────────────────────
 

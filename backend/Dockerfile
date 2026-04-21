@@ -1,21 +1,24 @@
-FROM python:3.13-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Instalar ffmpeg (para pydub/whisper) y libsndfile1 (para librosa)
+# Se añade git porque algunas dependencias de WhisperX lo requieren al instalar por pip
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
 RUN mkdir -p /app/data/voice_calibrations /app/data/configs
 
-# Pre-descargar el modelo Whisper durante el build para que el primer
-# request de calibración no tenga que descargarlo (244 MB).
-# Si el volumen whisper_cache ya contiene el modelo, este paso no hace nada.
-RUN python -c "import whisper; whisper.load_model('small')" || true
+# (Opcional) Precargar WhisperX. Si usas el modelo 'base', descargará los pesos de PyTorch.
+# RUN python -c "import whisperx; whisperx.load_model('base', 'cpu', compute_type='float32')" || true
 
 EXPOSE 8000
 
