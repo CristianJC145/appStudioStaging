@@ -35,6 +35,7 @@ const DEFAULT_CONFIG = {
   factor_suspensivos: 1.5,
   max_chars_parrafo: 290,
   min_chars_parrafo: 220,
+  classifier_enabled: true,
 }
 
 const TABS = [
@@ -122,6 +123,8 @@ export default function GuionesModule() {
   const [generating, setGenerating]       = useState(false)
 
   // ── Classifier state ───────────────────────────────────────────────────────
+  // classifierEnabled: whether the entire classifier system is active
+  const classifierEnabled = config.classifier_enabled !== false
   // classifierEvents: { "intro_0": {confianza, decision, razon, modo}, ... }
   const [classifierEvents,    setClassifierEvents]    = useState({})
   // classifierStatus: { intro: {ejemplos, umbral, siguiente_umbral}, afirmaciones: {}, meditacion: {} }
@@ -156,6 +159,22 @@ export default function GuionesModule() {
             body: JSON.stringify({ user_id: parseInt(uid), config: next }),
           }).catch(() => {})
         }, 1500)
+      }
+      return next
+    })
+  }, [])
+
+  // Toggle the entire classifier system on/off — saves immediately to DB
+  const toggleClassifier = useCallback(() => {
+    const uid = getUserId()
+    setConfig(prev => {
+      const next = { ...prev, classifier_enabled: prev.classifier_enabled === false ? true : false }
+      if (uid) {
+        fetch(`${API}/api/config`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: parseInt(uid), config: next }),
+        }).catch(() => {})
       }
       return next
     })
@@ -206,12 +225,27 @@ export default function GuionesModule() {
       // ── Auto-rejected (WhisperX early discard) ───────────────────────────
       if (evt.type === "intro_auto_rejected" || evt.type === "afirm_auto_rejected" || evt.type === "medit_auto_rejected") {
         const sec = evt.data.section, idx = evt.data.index
+        const coincid = evt.data.coincidencia_texto
+        const intento = evt.data.intento ?? 1
+        const key     = `${sec}_${idx}`
+
+        // Always store the warning so all modes can see the detected problem
+        setClassifierEvents(prev => ({ ...prev, [key]: {
+          ...prev[key],
+          descartar_automatico:  true,
+          razon_principal:       "mala_pronunciacion",
+          coincidencia_texto:    coincid,
+          explicacion_detallada: `Pronunciación incorrecta: ${coincid != null ? coincid + "%" : "?"} de coincidencia de texto (umbral ≥95%). Intento ${intento} de 2.`,
+        }}))
+
+        // Auto-regen only in Autónomo / Pro modes (user-controlled toggle)
+        const segMap = { intro: "intro", afirm: "afirmaciones", medit: "meditacion" }
+        const seg = segMap[sec]
         const jid = jobIdRef.current
-        if (jid) {
-          // Auto-trigger regeneration — bad pronunciation detected by WhisperX
-          if (sec === "intro")  setIntroDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
-          else if (sec === "afirm") setAfirmDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
-          else setMeditDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+        if (autonomousModeRef.current[seg] && jid) {
+          if (sec === "intro")       setIntroDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+          else if (sec === "afirm")  setAfirmDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
+          else                       setMeditDecisions(prev => ({ ...prev, [idx]: "regenerate" }))
           fetch(`${API}/api/review`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -221,6 +255,20 @@ export default function GuionesModule() {
             }),
           }).catch(() => {})
         }
+      }
+
+      // ── Discard warning (max auto-regen attempts reached) ────────────────
+      if (evt.type === "intro_discard_warning" || evt.type === "afirm_discard_warning" || evt.type === "medit_discard_warning") {
+        const sec    = evt.data.section, idx = evt.data.index
+        const coincid = evt.data.coincidencia_texto
+        const key     = `${sec}_${idx}`
+        setClassifierEvents(prev => ({ ...prev, [key]: {
+          ...prev[key],
+          descartar_automatico:  true,
+          razon_principal:       "mala_pronunciacion",
+          coincidencia_texto:    coincid,
+          explicacion_detallada: `Pronunciación incorrecta (${coincid != null ? coincid + "%" : "?"} coincidencia). Máximo de reintentos alcanzado. Revisión manual necesaria.`,
+        }}))
       }
 
       // ── Classifier events ─────────────────────────────────────────────────
@@ -361,7 +409,11 @@ export default function GuionesModule() {
       const res = await fetch(`${API}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guion, config, nombre, user_id: userIdRef.current ? parseInt(userIdRef.current) : null }),
+        body: JSON.stringify({
+          guion, config, nombre,
+          // user_id=null when classifier disabled → backend skips all classifier work
+          user_id: (config.classifier_enabled !== false && userIdRef.current) ? parseInt(userIdRef.current) : null,
+        }),
       })
       const data = await res.json()
       const id   = data.job_id
@@ -463,6 +515,8 @@ export default function GuionesModule() {
           classifierLanguage={classifierLanguage}
           onLanguageChange={(lang) => { setClassifierLanguage(lang); fetchClassifierStatus(lang) }}
           onResetSegment={resetSegment}
+          enabled={classifierEnabled}
+          onToggleEnabled={toggleClassifier}
         />
 
         {tab === "editor" && (
@@ -501,6 +555,7 @@ export default function GuionesModule() {
             afirmRegenerating={afirmRegenerating}
             meditRegenerating={meditRegenerating}
             classifierEvents={classifierEvents}
+            classifierEnabled={classifierEnabled}
             onDecision={submitDecision}
             onFinalize={finalizeSection}
             jobStatus={jobStatus}

@@ -91,6 +91,16 @@ function ResetIcon({ size = 10 }) {
   )
 }
 
+function PowerIcon({ size = 11 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+      <line x1="12" y1="2" x2="12" y2="12" />
+    </svg>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────
 export default function ClassifierDropdown({
   status,
@@ -99,6 +109,8 @@ export default function ClassifierDropdown({
   classifierLanguage,
   onLanguageChange,
   onResetSegment,
+  enabled = true,
+  onToggleEnabled,
 }) {
   const confirm                 = useConfirm()
   const [open, setOpen]         = useState(false)
@@ -157,44 +169,67 @@ export default function ClassifierDropdown({
       >
         {/* Header */}
         <div className="clf-fab-header">
-          <span className="clf-fab-header-icon" style={{ color: accent }}>
+          <span className="clf-fab-header-icon" style={{ color: enabled ? accent : "var(--tx3)" }}>
             <AiIcon size={14} />
           </span>
           <div className="clf-fab-header-text">
             <span className="clf-fab-header-title">Clasificador IA</span>
-            <span className="clf-fab-header-sub">Aprendizaje progresivo</span>
+            <span className="clf-fab-header-sub">{enabled ? "Aprendizaje progresivo" : "Desactivado"}</span>
           </div>
           <div className="clf-fab-header-right">
-            {totalExamples > 0 && (
+            {enabled && totalExamples > 0 && (
               <span className="clf-fab-header-badge">{totalExamples} ej.</span>
             )}
-            <select
-              className="clf-lang-select"
-              value={classifierLanguage || "es"}
-              onChange={e => onLanguageChange?.(e.target.value)}
-              onClick={e => e.stopPropagation()}
-              title="Idioma del clasificador"
-            >
-              {LANGUAGES.map(l => (
-                <option key={l.value} value={l.value}>{l.label}</option>
-              ))}
-            </select>
+            {enabled && (
+              <select
+                className="clf-lang-select"
+                value={classifierLanguage || "es"}
+                onChange={e => onLanguageChange?.(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                title="Idioma del clasificador"
+              >
+                {LANGUAGES.map(l => (
+                  <option key={l.value} value={l.value}>{l.label}</option>
+                ))}
+              </select>
+            )}
+            {enabled && (
+              <button
+                className={`clf-info-btn ${showInfo ? "clf-info-btn--active" : ""}`}
+                onClick={() => setShowInfo(v => !v)}
+                title="Cómo funciona el clasificador"
+                aria-label="Información del clasificador"
+                aria-pressed={showInfo}
+              >
+                i
+              </button>
+            )}
             <button
-              className={`clf-info-btn ${showInfo ? "clf-info-btn--active" : ""}`}
-              onClick={() => setShowInfo(v => !v)}
-              title="Cómo funciona el clasificador"
-              aria-label="Información del clasificador"
-              aria-pressed={showInfo}
+              className={`clf-power-btn ${!enabled ? "clf-power-btn--off" : ""}`}
+              onClick={(e) => { e.stopPropagation(); onToggleEnabled?.() }}
+              title={enabled ? "Desactivar clasificador" : "Activar clasificador"}
+              aria-label={enabled ? "Desactivar clasificador" : "Activar clasificador"}
+              aria-pressed={enabled}
             >
-              i
+              <PowerIcon size={11} />
             </button>
           </div>
         </div>
 
         <div className="clf-fab-divider" />
 
+        {/* Disabled banner */}
+        {!enabled && (
+          <div className="clf-disabled-banner">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
+            </svg>
+            <span>Sistema desactivado. Las aprobaciones y rechazos van directo sin modales ni datos de calidad.</span>
+          </div>
+        )}
+
         {/* Info panel */}
-        <div className={`clf-info-panel ${showInfo ? "clf-info-panel--open" : ""}`}>
+        <div className={`clf-info-panel ${showInfo && enabled ? "clf-info-panel--open" : ""}`}>
           <div className="clf-info-inner">
             {INFO_PHASES.map(p => (
               <div key={p.key} className="clf-info-phase">
@@ -210,7 +245,7 @@ export default function ClassifierDropdown({
         </div>
 
         {/* Segments */}
-        <div className="clf-fab-segs">
+        <div className={`clf-fab-segs${!enabled ? " clf-fab-segs--disabled" : ""}`}>
           {SEG_ENTRIES.map(({ key, label }) => {
             const info    = status?.[key]
             const n       = info?.ejemplos        ?? 0
@@ -298,14 +333,18 @@ export default function ClassifierDropdown({
       {/* ── FAB circle ───────────────────────────── */}
       <button
         ref={fabRef}
-        className={`clf-fab ${open ? "clf-fab--active" : ""} ${anyAutoActive ? "clf-fab--auto-on" : ""}`}
-        style={{ color: accent }}
+        className={`clf-fab ${open ? "clf-fab--active" : ""} ${anyAutoActive && enabled ? "clf-fab--auto-on" : ""} ${!enabled ? "clf-fab--disabled" : ""}`}
+        style={{ color: enabled ? accent : "var(--tx3)" }}
         onClick={() => setOpen(o => !o)}
-        aria-label={open ? "Cerrar clasificador" : "Ver estado del Clasificador IA"}
+        aria-label={open ? "Cerrar clasificador" : enabled ? "Ver estado del Clasificador IA" : "Clasificador desactivado — click para configurar"}
         aria-expanded={open}
+        title={!enabled ? "Clasificador IA desactivado" : undefined}
       >
-        <AiIcon size={17} />
-        <span className="clf-fab-dot" style={{ background: accent }} />
+        {enabled
+          ? <AiIcon size={17} />
+          : <PowerIcon size={15} />
+        }
+        <span className="clf-fab-dot" style={{ background: enabled ? accent : "#555" }} />
       </button>
 
     </div>,

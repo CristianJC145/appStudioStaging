@@ -2484,6 +2484,74 @@ input[type="range"]:hover::-webkit-slider-thumb {
     0 0 20px rgba(74,184,212,0.3);
 }
 
+/* ── FAB desactivado ── */
+.clf-fab--disabled {
+  filter: grayscale(1);
+  opacity: 0.45;
+  border-color: rgba(255,255,255,0.1);
+  animation: none !important;
+}
+.clf-fab--disabled:hover {
+  opacity: 0.7;
+  filter: grayscale(0.6);
+  border-color: rgba(255,255,255,0.2);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  transform: scale(1.06);
+}
+
+/* ── Banner de clasificador desactivado ── */
+.clf-disabled-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 16px 11px;
+  background: rgba(232,72,60,0.07);
+  border-bottom: 1px solid rgba(232,72,60,0.15);
+  font-size: 0.69rem;
+  color: rgba(232,100,80,0.85);
+  line-height: 1.45;
+}
+.clf-disabled-banner svg { flex-shrink: 0; margin-top: 1px; }
+
+/* ── Segmentos dimados cuando está desactivado ── */
+.clf-fab-segs--disabled {
+  opacity: 0.3;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Botón power ── */
+.clf-power-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(74,184,212,0.06);
+  border: 1px solid rgba(74,184,212,0.18);
+  cursor: pointer;
+  color: rgba(74,184,212,0.55);
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.clf-power-btn:hover {
+  background: rgba(74,184,212,0.13);
+  border-color: rgba(74,184,212,0.45);
+  color: #4ab8d4;
+}
+.clf-power-btn--off {
+  background: rgba(232,72,60,0.12);
+  border-color: rgba(232,72,60,0.35);
+  color: rgba(232,100,80,0.9);
+}
+.clf-power-btn--off:hover {
+  background: rgba(45,190,96,0.12);
+  border-color: rgba(45,190,96,0.4);
+  color: #2dbe60;
+}
+
 /* ── Botón reset ── */
 .clf-reset-btn {
   display: flex;
@@ -2621,6 +2689,11 @@ input[type="range"]:hover::-webkit-slider-thumb {
   background: rgba(232,72,60,0.10);
   color: var(--red);
   border: 1px solid rgba(232,72,60,0.22);
+}
+.clf-badge--discard {
+  background: rgba(255,140,0,0.10);
+  color: #e88c00;
+  border: 1px solid rgba(255,140,0,0.28);
 }
 
 /* ═══════════════════════════════════════════════════════════════

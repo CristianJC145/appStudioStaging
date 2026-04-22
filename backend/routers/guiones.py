@@ -575,26 +575,50 @@ def _clasificar_en_bg(
     def _task():
         job_meta      = jobs.get(job_id, {})
         user_id       = job_meta.get("user_id")
+        # Classifier disabled: user_id is None when classifier_enabled=false on frontend
+        if not user_id:
+            return
         language_code = job_meta.get("language_code", "es")
         segmento      = _SEG_MAP_CLS.get(section, section)
 
         def _on_features(features):
             # Phase 1: Early discard — bad pronunciation detected by WhisperX
             if features.get("descartar_automatico"):
-                if user_id:
-                    guardar_ejemplo(
-                        user_id, segmento, features, "rechazado",
-                        intento=1,
-                        params_elevenlabs=features.get("params_elevenlabs") or {},
-                        language_code=language_code,
-                        razon_rechazo=["mala_pronunciacion"],
-                    )
-                    verificar_y_regenerar_resumen(user_id, segmento, language_code)
-                emit_event(job_id, f"{section}_auto_rejected", {
-                    "index":   index,
-                    "section": section,
-                    "razon":   features.get("razon_descarte", "mala_pronunciacion"),
-                })
+                # Track attempt count per segment to prevent infinite auto-regen loops
+                job_data   = jobs.get(job_id, {})
+                auto_counts = job_data.setdefault("auto_regen_counts", {})
+                regen_key  = f"{section}_{index}"
+                attempt    = auto_counts.get(regen_key, 0) + 1
+                auto_counts[regen_key] = attempt
+
+                coincid = features.get("coincidencia_texto")
+
+                if attempt <= 2:
+                    if user_id:
+                        guardar_ejemplo(
+                            user_id, segmento, features, "rechazado",
+                            intento=attempt,
+                            params_elevenlabs=features.get("params_elevenlabs") or {},
+                            language_code=language_code,
+                            razon_rechazo=["mala_pronunciacion"],
+                        )
+                        verificar_y_regenerar_resumen(user_id, segmento, language_code)
+                    emit_event(job_id, f"{section}_auto_rejected", {
+                        "index":              index,
+                        "section":            section,
+                        "razon":              features.get("razon_descarte", "mala_pronunciacion"),
+                        "coincidencia_texto": coincid,
+                        "intento":            attempt,
+                    })
+                else:
+                    # Max auto-regen attempts reached — notify for manual review, no more auto-regen
+                    emit_event(job_id, f"{section}_discard_warning", {
+                        "index":              index,
+                        "section":            section,
+                        "razon":              features.get("razon_descarte", "mala_pronunciacion"),
+                        "coincidencia_texto": coincid,
+                        "message":            f"Pronunciación incorrecta ({coincid}% coincidencia). Revisión manual recomendada.",
+                    })
                 return
 
             if not user_id:

@@ -43,20 +43,46 @@ function XAITooltip({ text }) {
 //  Confidence Badge con botón ℹ para XAI
 // ─────────────────────────────────────────────────────────────
 function ConfidenceBadge({ data }) {
-  if (!data || data.decision == null) return null
+  if (!data) return null
+
+  // Auto-discard case: bad pronunciation detected by WhisperX (all modes see this)
+  if (data.descartar_automatico) {
+    const coincid  = data.coincidencia_texto
+    const label    = coincid != null ? `${coincid}% texto` : "Mala pronunciación"
+    const explicac = data.explicacion_detallada || ""
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+        <span className="clf-badge clf-badge--discard" title="Pronunciación incorrecta detectada por WhisperX">
+          <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5v-4h1.5v4z"/>
+          </svg>
+          {label}
+        </span>
+        {explicac && <XAITooltip text={explicac} />}
+      </span>
+    )
+  }
+
+  if (data.decision == null) return null
 
   const c        = data.confianza ?? 0
   const razon    = data.razon_principal || data.razon || ""
   const explicac = data.explicacion_detallada || ""
 
-  let cls = "clf-badge clf-badge--low"
-  let icon = "⚠"
+  let cls   = "clf-badge clf-badge--low"
   let label = `Revisar · ${c}%`
+  let icon  = (
+    <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5v-4h1.5v4z"/>
+    </svg>
+  )
 
   if (data.decision === "aprobado" && c >= 85) {
-    cls = "clf-badge clf-badge--ok"; icon = "✦"; label = `${c}% confianza`
+    cls = "clf-badge clf-badge--ok"; label = `${c}% confianza`
+    icon = <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="2 8 6 12 14 4"/></svg>
   } else if (data.decision === "aprobado" && c >= 70) {
-    cls = "clf-badge clf-badge--warn"; icon = "◐"; label = `${c}% confianza`
+    cls = "clf-badge clf-badge--warn"; label = `${c}% confianza`
+    icon = <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 1v7l4 4" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
   }
 
   return (
@@ -247,7 +273,7 @@ function AudioPlayer({ src }) {
 // ─────────────────────────────────────────────────────────────
 //  Card individual
 // ─────────────────────────────────────────────────────────────
-function ReviewCard({ section, index, label, text, audioUrl, decision, onDecision, classifierData }) {
+function ReviewCard({ section, index, label, text, audioUrl, decision, onDecision, classifierData, classifierEnabled }) {
   const [editing, setEditing]         = useState(false)
   const [editedText, setEditedText]   = useState("")
   const [regenCount, setRegenCount]   = useState(0)
@@ -277,9 +303,14 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
     } catch {}
   }
 
-  // Aprobar → show star modal
+  // Aprobar → show star modal (skip if classifier disabled)
   const handleAprobarClick = () => {
     if (!audioUrl) return
+    if (!classifierEnabled) {
+      setRegenCount(0)
+      onDecision(section, index, "ok")
+      return
+    }
     setPendingReject(false)
     setPendingOk(true)
   }
@@ -289,9 +320,14 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
     onDecision(section, index, "ok", null, { calidad_score: stars })
   }
 
-  // Regenerar → show rejection labels
+  // Regenerar → show rejection labels (skip if classifier disabled)
   const handleRegenClick = () => {
     if (!audioUrl) return
+    if (!classifierEnabled) {
+      setRegenCount(0)
+      onDecision(section, index, "regenerate")
+      return
+    }
     setPendingOk(false)
     setPendingReject(true)
   }
@@ -333,7 +369,7 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
             {decision === "skip"       && "Omitir"}
           </span>
         )}
-        <ConfidenceBadge data={classifierData} />
+        {classifierEnabled && <ConfidenceBadge data={classifierData} />}
       </div>
 
       <div className="review-card-text" style={{ whiteSpace: "pre-line" }}>
@@ -454,7 +490,7 @@ function ReviewCard({ section, index, label, text, audioUrl, decision, onDecisio
 // ─────────────────────────────────────────────────────────────
 //  Panel de sección
 // ─────────────────────────────────────────────────────────────
-function SectionReview({ section, label, items, audios, decisions, onDecision, onFinalize, jobStatus, isActive, regeneratingItems, classifierEvents }) {
+function SectionReview({ section, label, items, audios, decisions, onDecision, onFinalize, jobStatus, isActive, regeneratingItems, classifierEvents, classifierEnabled }) {
   const total    = items.length
   const decided  = Object.keys(decisions).length
   const approved = Object.values(decisions).filter(d => d === "ok").length
@@ -542,6 +578,7 @@ function SectionReview({ section, label, items, audios, decisions, onDecision, o
             decision={decisions[i]}
             onDecision={onDecision}
             classifierData={classifierEvents?.[`${section}_${i}`] ?? null}
+            classifierEnabled={classifierEnabled}
           />
         ))}
       </div>
@@ -574,6 +611,7 @@ export default function ReviewPanel({
   meditaciones, meditAudios, meditDecisions,
   introRegenerating, afirmRegenerating, meditRegenerating,
   classifierEvents,
+  classifierEnabled,
   onDecision, onFinalize, jobStatus,
 }) {
   const hasIntro = introBloques.length > 0
@@ -617,7 +655,7 @@ export default function ReviewPanel({
           items={introBloques} audios={introAudios} decisions={introDecisions}
           onDecision={onDecision} onFinalize={onFinalize} jobStatus={jobStatus}
           isActive={reviewSection === "intro"} regeneratingItems={introRegenerating}
-          classifierEvents={classifierEvents}
+          classifierEvents={classifierEvents} classifierEnabled={classifierEnabled}
         />
       )}
 
@@ -629,7 +667,7 @@ export default function ReviewPanel({
           items={afirmaciones} audios={afirmAudios} decisions={afirmDecisions}
           onDecision={onDecision} onFinalize={onFinalize} jobStatus={jobStatus}
           isActive={reviewSection === "afirm"} regeneratingItems={afirmRegenerating}
-          classifierEvents={classifierEvents}
+          classifierEvents={classifierEvents} classifierEnabled={classifierEnabled}
         />
       )}
 
@@ -641,7 +679,7 @@ export default function ReviewPanel({
           items={meditaciones} audios={meditAudios} decisions={meditDecisions}
           onDecision={onDecision} onFinalize={onFinalize} jobStatus={jobStatus}
           isActive={reviewSection === "medit"} regeneratingItems={meditRegenerating}
-          classifierEvents={classifierEvents}
+          classifierEvents={classifierEvents} classifierEnabled={classifierEnabled}
         />
       )}
     </div>
