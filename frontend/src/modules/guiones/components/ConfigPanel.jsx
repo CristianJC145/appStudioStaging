@@ -296,7 +296,7 @@ export default function ConfigPanel({ config, setConfig, userId }) {
 
         <div className="field">
           <label>Output Format (ElevenLabs)</label>
-          <select value={config.output_format || "mp3_44100_128"} onChange={e => set("output_format", e.target.value)}>
+          <select value={config.output_format || "pcm_44100"} onChange={e => set("output_format", e.target.value)}>
             <optgroup label="MP3">
               <option value="mp3_44100_32">MP3 · 32 kbps (ligero)</option>
               <option value="mp3_44100_128">MP3 · 128 kbps (recomendado)</option>

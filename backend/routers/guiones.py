@@ -265,7 +265,7 @@ def _audio_intro(texto: str, carpeta: "Path", indice: int,
                  cfg: "Config", force_regen: bool = False) -> "Optional[AudioSegment]":
     """Genera (o carga de caché) el audio de un bloque de INTRO."""
     return cargar_oracion(texto, carpeta, "intro", indice,
-                          cfg.intro_voice_speed, cfg.intro_tempo_factor, cfg,
+                          cfg.intro_voice_speed, cfg,
                           force_regen=force_regen)
 
 
@@ -273,7 +273,7 @@ def _audio_medit(texto: str, carpeta: "Path", indice: int,
                  cfg: "Config", force_regen: bool = False) -> "Optional[AudioSegment]":
     """Genera (o carga de caché) el audio de un bloque de MEDITACIÓN."""
     return cargar_oracion(texto, carpeta, "medit", indice,
-                          cfg.medit_voice_speed, cfg.medit_tempo_factor, cfg,
+                          cfg.medit_voice_speed, cfg,
                           force_regen=force_regen)
 
 
@@ -296,14 +296,11 @@ class Config(BaseModel):
     voice_id: str = "3fRg3Y6XXL8gnxYFuN1z"
     model_id: str = "eleven_multilingual_v2"
     language_code: str = "es"
-    output_format: str = "mp3_44100_128"
+    output_format: str = "pcm_44100"
     voice_settings: VoiceSettings = VoiceSettings()
     intro_voice_speed: float = 1.0
-    intro_tempo_factor: float = 0.98
     afirm_voice_speed: float = 0.94
-    afirm_tempo_factor: float = 0.95
     medit_voice_speed: float = 0.90
-    medit_tempo_factor: float = 0.91
     pausa_entre_oraciones: int = 400
     pausa_entre_afirmaciones: int = 5000
     pausa_intro_a_afirm: int = 2000
@@ -359,39 +356,6 @@ def ruta_cache(carpeta: Path, prefijo: str, indice: int, texto: str,
     h = hash_texto(texto, voice_speed, settings, output_format)
     return carpeta / f"{prefijo}_{indice:05d}_{h}.wav"
 
-def _atempo_chain(factor: float) -> str:
-    filtros = []
-    f = factor
-    while f < 0.5:
-        filtros.append("atempo=0.5")
-        f /= 0.5
-    while f > 2.0:
-        filtros.append("atempo=2.0")
-        f /= 2.0
-    filtros.append(f"atempo={f:.6f}")
-    return ",".join(filtros)
-
-def aplicar_tempo(audio: "AudioSegment", factor: float) -> "AudioSegment":
-    if factor == 1.0:
-        return audio
-    tmp_in  = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_in.close()
-    tmp_out.close()
-    try:
-        audio.export(tmp_in.name, format="wav")
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", tmp_in.name,
-             "-filter:a", _atempo_chain(factor),
-             "-ar", str(audio.frame_rate),
-             "-c:a", "pcm_s16le",
-             tmp_out.name],
-            check=True, capture_output=True
-        )
-        return AudioSegment.from_wav(tmp_out.name)
-    finally:
-        os.unlink(tmp_in.name)
-        os.unlink(tmp_out.name)
 
 def extender_silencios_internos(audio: "AudioSegment", cfg: Config) -> "AudioSegment":
     rangos = detect_silence(audio, min_silence_len=cfg.silence_min_ms,
@@ -457,6 +421,22 @@ def _load_audio(ruta: Path, output_format: str) -> "AudioSegment":
     return AudioSegment.from_file(ruta)
 
 
+def _bytes_to_audiosegment(raw: bytes, output_format: str) -> "AudioSegment":
+    """Convierte bytes crudos de la API (PCM o MP3) a AudioSegment."""
+    if output_format.startswith("pcm_"):
+        import wave
+        rate = int(output_format.split("_")[1])
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(rate)
+            wf.writeframes(raw)
+        buf.seek(0)
+        return AudioSegment.from_wav(buf)
+    return AudioSegment.from_file(io.BytesIO(raw))
+
+
 def _trim_calentamiento(audio: "AudioSegment") -> "AudioSegment":
     """
     Elimina del inicio del audio el texto de calentamiento.
@@ -479,7 +459,7 @@ def _trim_calentamiento(audio: "AudioSegment") -> "AudioSegment":
 
 
 def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
-                   voice_speed: float, tempo_factor: float, cfg: Config,
+                   voice_speed: float, cfg: Config,
                    force_regen: bool = False) -> Optional["AudioSegment"]:
     settings_dict = cfg.voice_settings.model_dump()
     fmt = getattr(cfg, "output_format", "mp3_44100_128") or "mp3_44100_128"
@@ -514,8 +494,6 @@ def cargar_oracion(texto: str, carpeta: Path, prefijo: str, indice: int,
     audio = _load_audio(ruta, fmt)
     if cfg.extend_silence:
         audio = extender_silencios_internos(audio, cfg)
-    if tempo_factor != 1.0:
-        audio = aplicar_tempo(audio, tempo_factor)
     return audio
 
 def detectar_secciones(texto: str) -> dict:
@@ -894,11 +872,11 @@ def _cargar_grupo_afirm_timestamps(
     # ⬇️ NOTA: Ahora devolvemos 4 elementos (se añade char_start_ms)
 
     settings_dict = cfg.voice_settings.model_dump()
-    api_fmt = "mp3_44100_128"
-    
+    api_fmt = cfg.output_format
+
     # Reemplazamos los saltos de línea por puntos suspensivos para forzar el silencio en el TTS
     texto_tts = texto_grupo.strip().replace("\n\n", "\n\n...\n\n")
-    
+
     h = hash_texto(texto_tts, voice_speed, settings_dict, api_fmt + "_ts")
     ruta_wav  = carpeta / f"afirm_grp_{indice:05d}_{h}.wav"
     ruta_json = carpeta / f"afirm_grp_{indice:05d}_{h}_align.json"
@@ -932,10 +910,10 @@ def _cargar_grupo_afirm_timestamps(
             if r.status_code == 200:
                 data = r.json()
                 audio_bytes = base64.b64decode(data["audio_base64"])
-                audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+                audio = _bytes_to_audiosegment(audio_bytes, api_fmt)
                 alignment = data.get("alignment", {})
                 characters = alignment.get("characters", [])
-                
+
                 # Extraemos ambos tiempos
                 char_start_ms = [t * 1000.0 for t in alignment.get("character_start_times_seconds", [])]
                 char_end_ms   = [t * 1000.0 for t in alignment.get("character_end_times_seconds", [])]
@@ -1171,7 +1149,6 @@ def _cortar_por_timestamps(
 def _regenerar_afirm_individual(
     texto: str,
     voice_speed: float,
-    tempo_factor: float,
     cfg: Config,
 ) -> Optional["AudioSegment"]:
     """
@@ -1190,7 +1167,7 @@ def _regenerar_afirm_individual(
     texto_completo = (warmup_text + "\n\n" + texto_afirm) if warmup_text else texto_afirm
 
     url = (f"https://api.elevenlabs.io/v1/text-to-speech/"
-           f"{cfg.voice_id}/with-timestamps?output_format=mp3_44100_128")
+           f"{cfg.voice_id}/with-timestamps?output_format={cfg.output_format}")
     headers = {"xi-api-key": cfg.api_key, "Content-Type": "application/json"}
     payload = {
         "text": texto_completo,
@@ -1209,7 +1186,7 @@ def _regenerar_afirm_individual(
             if r.status_code == 200:
                 data = r.json()
                 audio_bytes = base64.b64decode(data["audio_base64"])
-                audio_raw = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+                audio_raw = _bytes_to_audiosegment(audio_bytes, cfg.output_format)
                 alignment = data.get("alignment", {})
                 characters = alignment.get("characters", [])
                 char_end_ms = [t * 1000.0 for t in
@@ -1242,8 +1219,6 @@ def _regenerar_afirm_individual(
         audio_afirm = audio_raw
 
     audio_afirm = _trim_silence(audio_afirm)
-    if tempo_factor != 1.0:
-        audio_afirm = aplicar_tempo(audio_afirm, tempo_factor)
     if cfg.extend_silence:
         audio_afirm = extender_silencios_internos(audio_afirm, cfg)
     return audio_afirm
@@ -1261,7 +1236,7 @@ def _guardar_preview(audio: "AudioSegment", job_id: str,
 
 def _esperar_revision(job_id: str, section: str, items: list[str],
                       carpeta: Path, prefijo: str,
-                      voice_speed: float, tempo_factor: float,
+                      voice_speed: float,
                       cfg: Config, event_ready: str,
                       event_regenerating: str,
                       audio_fn=None):
@@ -1298,7 +1273,7 @@ def _esperar_revision(job_id: str, section: str, items: list[str],
                 else:
                     audio = cargar_oracion(
                         items[i], carpeta, prefijo, i,
-                        voice_speed, tempo_factor, cfg,
+                        voice_speed, cfg,
                         force_regen=True
                     )
                 if audio:
@@ -1389,7 +1364,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
 
             _esperar_revision(
                 job_id, "intro", bloques_intro, carpeta, "intro",
-                cfg.intro_voice_speed, cfg.intro_tempo_factor, cfg,
+                cfg.intro_voice_speed, cfg,
                 event_ready="intro_ready", event_regenerating="intro_regenerating",
                 audio_fn=_audio_intro
             )
@@ -1440,8 +1415,6 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                         segmentos.append(None)
                         continue
                     seg = _trim_silence(seg)
-                    if cfg.afirm_tempo_factor != 1.0:
-                        seg = aplicar_tempo(seg, cfg.afirm_tempo_factor)
                     if cfg.extend_silence:
                         seg = extender_silencios_internos(seg, cfg)
                     segmentos.append(seg)
@@ -1492,8 +1465,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     # Regeneración individual con filler (warmup) para garantizar
                     # corte limpio en silencio explícito, independiente del grupo.
                     audio = _regenerar_afirm_individual(
-                        texto_afirm, cfg.afirm_voice_speed,
-                        cfg.afirm_tempo_factor, cfg
+                        texto_afirm, cfg.afirm_voice_speed, cfg
                     )
                     if audio:
                         audio_url = _guardar_preview(audio, job_id, "afirm", flat_i)
@@ -1553,7 +1525,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
 
             _esperar_revision(
                 job_id, "medit", bloques_medit, carpeta, "medit",
-                cfg.medit_voice_speed, cfg.medit_tempo_factor, cfg,
+                cfg.medit_voice_speed, cfg,
                 event_ready="medit_ready", event_regenerating="medit_regenerating",
                 audio_fn=_audio_medit
             )
