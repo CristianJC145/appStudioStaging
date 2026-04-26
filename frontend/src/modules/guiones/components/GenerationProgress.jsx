@@ -17,6 +17,7 @@ const EVENT_ICONS = {
   building:            "⟳",
   done:                "✦",
   error:               "✗",
+  credits_exceeded:    "⚠",
   default:             "·",
 }
 
@@ -69,6 +70,7 @@ export default function GenerationProgress({
   }, [events])
 
   const progress = computeProgress(events)
+  const creditsExceeded = events.some(e => e.type === "credits_exceeded")
 
   const statusLabel = {
     starting:        "Iniciando",
@@ -103,6 +105,26 @@ export default function GenerationProgress({
 
   return (
     <div className="fade-up" style={{ maxWidth: 760, margin: "0 auto" }}>
+
+      {/* Banner de créditos excedidos */}
+      {creditsExceeded && (
+        <div style={{
+          background: "rgba(224,82,82,0.1)",
+          border: "1px solid rgba(224,82,82,0.4)",
+          borderRadius: 8,
+          padding: "10px 16px",
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          color: "#e05252",
+          fontWeight: 600,
+          fontSize: 13,
+        }}>
+          <span style={{ fontSize: 16 }}>⚠</span>
+          <span>Créditos del mes agotados — se están usando créditos extra en esta cuenta.</span>
+        </div>
+      )}
 
       {/* Banner de descarga */}
       {downloadUrl && (

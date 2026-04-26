@@ -208,7 +208,7 @@ export default function ConfigPanel({ config, setConfig, userId }) {
                   display: "flex", alignItems: "center", gap: 6,
                 }}>
                   <span style={{ fontSize: 14 }}>⚠</span>
-                  Créditos agotados — cambia a otra cuenta antes de generar
+                  Créditos del mes agotados — se usarán créditos extra al generar
                 </div>
               )}
               {critico && (

@@ -399,6 +399,14 @@ def texto_a_audio_api(texto: str, ruta_salida: Path,
                 if hasattr(_job_ctx, 'chars_usados'):
                     _job_ctx.chars_usados += chars_texto
                 return True
+            if r.status_code == 422:
+                try:
+                    detail = r.json().get("detail", {})
+                    if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
+                        if hasattr(_job_ctx, 'credits_exceeded'):
+                            _job_ctx.credits_exceeded = True
+                except Exception:
+                    pass
         except Exception:
             pass
         time.sleep(2 ** intento)
@@ -917,7 +925,7 @@ def _cargar_grupo_afirm_timestamps(
                 # Extraemos ambos tiempos
                 char_start_ms = [t * 1000.0 for t in alignment.get("character_start_times_seconds", [])]
                 char_end_ms   = [t * 1000.0 for t in alignment.get("character_end_times_seconds", [])]
-                
+
                 audio.export(str(ruta_wav), format="wav")
                 ruta_json.write_text(json.dumps(
                     {"characters": characters, "char_start_ms": char_start_ms, "char_end_ms": char_end_ms}
@@ -925,6 +933,14 @@ def _cargar_grupo_afirm_timestamps(
                 if hasattr(_job_ctx, 'chars_usados'):
                     _job_ctx.chars_usados += len(texto_grupo.strip())
                 return audio, characters, char_start_ms, char_end_ms
+            if r.status_code == 422:
+                try:
+                    detail = r.json().get("detail", {})
+                    if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
+                        if hasattr(_job_ctx, 'credits_exceeded'):
+                            _job_ctx.credits_exceeded = True
+                except Exception:
+                    pass
         except Exception:
             pass
         time.sleep(2 ** intento)
@@ -1194,6 +1210,14 @@ def _regenerar_afirm_individual(
                 if hasattr(_job_ctx, 'chars_usados'):
                     _job_ctx.chars_usados += len(texto_completo)
                 break
+            if r.status_code == 422:
+                try:
+                    detail = r.json().get("detail", {})
+                    if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
+                        if hasattr(_job_ctx, 'credits_exceeded'):
+                            _job_ctx.credits_exceeded = True
+                except Exception:
+                    pass
         except Exception:
             pass
         time.sleep(2 ** intento)
@@ -1300,8 +1324,18 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
         carpeta = CARPETA_TEMP / nombre
         carpeta.mkdir(parents=True, exist_ok=True)
 
-        # Inicializar contador de caracteres para este hilo
+        # Inicializar contador de caracteres y flag de créditos para este hilo
         _job_ctx.chars_usados = 0
+        _job_ctx.credits_exceeded = False
+        _credits_warned = False
+
+        def _check_and_warn_credits():
+            nonlocal _credits_warned
+            if not _credits_warned and getattr(_job_ctx, 'credits_exceeded', False):
+                _credits_warned = True
+                emit_event(job_id, "credits_exceeded", {
+                    "message": "Créditos del mes agotados — se están usando créditos extra."
+                })
 
         secciones   = detectar_secciones(guion)
         tiene_intro = bool(secciones["intro"])
@@ -1342,6 +1376,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     "message": f"Intro {i + 1}/{len(bloques_intro)}"
                 })
                 audio = _audio_intro(bloque, carpeta, i, cfg)
+                _check_and_warn_credits()
                 if audio:
                     audio_url = _guardar_preview(audio, job_id, "intro", i)
                     emit_event(job_id, "intro_ready", {
@@ -1401,6 +1436,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                 audio_grp, characters, char_start_ms, char_end_ms = _cargar_grupo_afirm_timestamps(
                     grupo_texto, carpeta, i, cfg.afirm_voice_speed, cfg
                 )
+                _check_and_warn_credits()
 
                 if audio_grp and n_en_grupo > 1:
                     raw_segs = _cortar_por_timestamps(audio_grp, characters, char_start_ms, char_end_ms, grupo_lineas)
@@ -1503,6 +1539,7 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
                     "message": f"Meditación {i + 1}/{len(bloques_medit)}"
                 })
                 audio = _audio_medit(bloque, carpeta, i, cfg)
+                _check_and_warn_credits()
                 if audio:
                     audio_url = _guardar_preview(audio, job_id, "medit", i)
                     emit_event(job_id, "medit_ready", {
