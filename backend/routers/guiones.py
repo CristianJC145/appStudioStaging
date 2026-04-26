@@ -405,6 +405,7 @@ def texto_a_audio_api(texto: str, ruta_salida: Path,
                     if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
                         if hasattr(_job_ctx, 'credits_exceeded'):
                             _job_ctx.credits_exceeded = True
+                        break  # quota no se resuelve reintentando
                 except Exception:
                     pass
         except Exception:
@@ -939,6 +940,7 @@ def _cargar_grupo_afirm_timestamps(
                     if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
                         if hasattr(_job_ctx, 'credits_exceeded'):
                             _job_ctx.credits_exceeded = True
+                        break  # quota no se resuelve reintentando
                 except Exception:
                     pass
         except Exception:
@@ -1216,6 +1218,7 @@ def _regenerar_afirm_individual(
                     if isinstance(detail, dict) and detail.get("status") == "quota_exceeded":
                         if hasattr(_job_ctx, 'credits_exceeded'):
                             _job_ctx.credits_exceeded = True
+                        break  # quota no se resuelve reintentando
                 except Exception:
                     pass
         except Exception:
@@ -1277,6 +1280,13 @@ def _esperar_revision(job_id: str, section: str, items: list[str],
 
     while True:
         decisions = jobs[job_id].get(decision_key, {})
+        # Auto-skip segments that never got audio (preview file missing)
+        for idx in range(len(items)):
+            if idx not in decisions:
+                preview_path = CARPETA_TEMP / f"preview_{job_id}_{section}_{idx}.wav"
+                if not preview_path.exists():
+                    decisions[idx] = "skip"
+                    jobs[job_id][decision_key][idx] = "skip"
         pending   = [i for i in range(len(items)) if i not in decisions]
 
         if not pending:
@@ -1483,6 +1493,13 @@ def run_generation_job(job_id: str, guion: str, cfg: Config, nombre: str):
 
             while True:
                 decisions = jobs[job_id].get("afirm_decisions", {})
+                # Auto-skip afirmaciones that never got audio (preview file missing)
+                for idx in range(len(afirmaciones)):
+                    if idx not in decisions:
+                        preview_path = CARPETA_TEMP / f"preview_{job_id}_afirm_{idx}.wav"
+                        if not preview_path.exists():
+                            decisions[idx] = "skip"
+                            jobs[job_id]["afirm_decisions"][idx] = "skip"
                 pending = [i for i in range(len(afirmaciones)) if i not in decisions]
                 if not pending:
                     break
